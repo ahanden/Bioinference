@@ -1,7 +1,27 @@
 import networkx as nx
 from fisher import pvalue
+import MySQLdb
 
 ####### NETWORK LOADING FUNCTIONS #########
+def readDB(conn):
+    """Reads interactions into a NetworkX graph from a MySQL database
+
+    Parameters
+    ----------
+    conn : A MySQLdb connection
+
+    Returns
+    -------
+    G : A NetworkX Graph
+    """
+    G = nx.Graph()
+    cursor = conn.cursor()
+    cursor.execute("SELECT entrez_id1, entrez_id2 FROM interactions")
+    for row in cursor.fetchall():
+        G.add_edge(row[0],row[1])
+    cursor.close()
+    return G
+
 def readGML(filename):
     """Reads a Graph from a GML formatted file.
 
@@ -14,7 +34,7 @@ def readGML(filename):
     G : A NetworkX Graph
     """
     
-    G = nx.read_gml(filename,relabel=True)
+    G = nx.read_gml(filename)
     # Remove self-edges
     for node in G.nodes():
         try:
@@ -206,18 +226,20 @@ def getPartners(nodes,CI,depth=1):
     
     neighbors = []
     this_level = []
-    next_level = nodes
+    next_level = {node: True for node in set(nodes) & set(CI)}
     visited = {}
         
     for i in range(depth):
+        if not next_level:
+            break
         this_level = next_level
         next_level = {}
         while this_level:
-            node = this_level.pop()
+            node, trash = this_level.popitem()
             visited[node] = True
             for neighbor in CI[node]:
-                if not node in visited:
-                    next_level[node] = True
+                if not neighbor in visited:
+                    next_level[neighbor] = True
                     
     return visited.keys()
 
@@ -388,24 +410,26 @@ def extendGraph(goi,CI,max_p=0.05,max_size=None):
     Increase efficiency by skipping obviously insignificant nodes
     """
 
-    if not size_max:
-        size_max = len(goi) * 2
+    if not max_size:
+        max_size = len(goi) * 2
 
     goi_set = set(goi)
     new_genes = set(goi)
     
-    G = nx.subgraph(new_genes)
+    G = CI.subgraph(new_genes)
+    comps = list(nx.connected_components(G))
 
     # Extend while the network is of a reasonable size
     # (Only examines the largest connected component)
+    print "Starting with a LCC of size %d" % (len(max(nx.connected_components(G), key=len)))
     while len(max(nx.connected_components(G), key=len)) < max_size:
 
         # Consider adding any interacting partner of the current extended network
-        neighbors = set(getPartners(new_genes,CI,1)) - new_genes
+        neighbors = set(getPartners(new_genes,CI,2)) - new_genes
         # Keep track of the genes with the greatest significance
         best_genes = {'nodes': [],'pval': 2}
         # Our population size is two interactions deep from the current genes
-        N = len(getPartners(new_genes,CI,2))
+        N = len(getPartners(new_genes,CI,3))
 
         for neighbor in neighbors:
             # Any included gene must interact with 1 GOI
@@ -419,7 +443,7 @@ def extendGraph(goi,CI,max_p=0.05,max_size=None):
             fp = len(CI[neighbor]) - tp
             fn = len(new_genes) - tp
             tn = N - tp - fp - fn 
-            p = pvalue(tp,fp,fn,tn)
+            p = pvalue(tp,fp,fn,tn).right_tail
             if p == best_genes['pval']:
                     best_genes['nodes'].append(neighbor)
             elif p < best_genes['pval']:
@@ -428,13 +452,15 @@ def extendGraph(goi,CI,max_p=0.05,max_size=None):
         
         # Stop the process if we fail to add any new nodes
         if len(best_genes['nodes']) == 0 or best_genes['pval'] >= max_p:
+            print "Maxed out significant genes"
             break
 
-        new_genes.update(best_gene['node'])
-        G = nx.subgraph(new_genes)
+        new_genes.update(best_genes['nodes'])
+        G = CI.subgraph(new_genes)
+        print "LCC has grown to %d nodes" % (len(max(nx.connected_components(G), key=len)))
         
     # Return only the largest connected component
-    return max(nx.connected_components(G), key=len)
+    return CI.subgraph(max(nx.connected_components(G), key=len))
 
 ##### STATISTIC METHODS ######
 def fishers(N,n,M,x):
