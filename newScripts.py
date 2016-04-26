@@ -1,14 +1,21 @@
-import networkx as nx
 from fisher import pvalue
+from subprocess import call
+from uuid import uuid4
 import MySQLdb
+import community
+import networkx as nx
+import os
+import sys
 
 ####### NETWORK LOADING FUNCTIONS #########
-def readDB(conn):
+def readDB(conn,min_pubs=0):
     """Reads interactions into a NetworkX graph from a MySQL database
 
     Parameters
     ----------
     conn : A MySQLdb connection
+
+    min_pubs : Minimum publications an edge must have in order to be included in the interactome (default=0)
 
     Returns
     -------
@@ -17,8 +24,13 @@ def readDB(conn):
     G = nx.Graph()
     cursor = conn.cursor()
     cursor.execute("SELECT entrez_id1, entrez_id2 FROM interactions")
+    cursor.execute("SELECT MAX(counted) FROM (SELECT COUNT(pubmed_id) AS counted FROM publications GROUP BY int_id) AS x")
+    max_pubs = cursor.fetchone()[0]
+    #cursor.execute("SELECT entrez_id1, entrez_id2, count(pubmed_id) FROM interactions LEFT JOIN publications ON interactions.int_id = publications.int_id GROUP BY interactions.int_id")
+    cursor.execute("SELECT entrez_id1, entrez_id2, count(pubmed_id) FROM interactions LEFT JOIN publications ON interactions.int_id = publications.int_id GROUP BY interactions.int_id HAVING count(pubmed_id) >= %s", [min_pubs])
     for row in cursor.fetchall():
-        G.add_edge(row[0],row[1])
+        if(int(row[2]) >= min_pubs):
+            G.add_edge(int(row[0]),int(row[1]),publications=int(row[2]),weight=1 + max_pubs - row[2])
     cursor.close()
     return G
 
@@ -46,8 +58,7 @@ def readGML(filename):
 def readTSV(filename):
     """Reads a Graph from a TSV formatted file.
     The TSV format should be as follows:
-        node1    node1    EntrezID1    EntrezID2
-    The file should NOT have a header line.
+        EntrezID1    EntrezID2
 
     Parameters
     ----------
@@ -60,8 +71,12 @@ def readTSV(filename):
     
     G = nx.Graph()
     with open(filename,'r') as file:
+        header = True
         for line in file:
-            (idA, idB, nodeA, nodeB) = line.strip().split("\t")
+            if header:
+                header = False
+                continue
+            (idA, idB) = line.strip().split("\t")
             if idA != idB: # Do not include self-interactions
                 G.add_edge(idA, idB)
     return G
@@ -387,7 +402,7 @@ def pruneGraph(G,CI,goi,pmax=0.05):
 
     return P
 
-def extendGraph(goi,CI,max_p=0.05,max_size=None):
+def extendGraph(goi,CI,max_p=0.05,max_size=None, verbose=False):
     """Uses the Chan lab's original graph extension method utilizing p-value cutoffs.
 
     Parameters
@@ -400,14 +415,11 @@ def extendGraph(goi,CI,max_p=0.05,max_size=None):
 
     max_size : the maximum number of nodes to include in the network (default=2 times the number of GOIs)
 
+    verbose : if True, will print to stdout the progress of the algorithm (default=False)
+
     Returns
     -------
     G : A NetworkX Graph
-
-    TODO
-    ----
-    Decide whether to add nodes one at a time or as a bunch
-    Increase efficiency by skipping obviously insignificant nodes
     """
 
     if not max_size:
@@ -421,7 +433,6 @@ def extendGraph(goi,CI,max_p=0.05,max_size=None):
 
     # Extend while the network is of a reasonable size
     # (Only examines the largest connected component)
-    print "Starting with a LCC of size %d" % (len(max(nx.connected_components(G), key=len)))
     while len(max(nx.connected_components(G), key=len)) < max_size:
 
         # Consider adding any interacting partner of the current extended network
@@ -452,15 +463,190 @@ def extendGraph(goi,CI,max_p=0.05,max_size=None):
         
         # Stop the process if we fail to add any new nodes
         if len(best_genes['nodes']) == 0 or best_genes['pval'] >= max_p:
-            print "Maxed out significant genes"
+            if verbose:
+                print "\nTerminating: All significant nodes included"
             break
 
         new_genes.update(best_genes['nodes'])
         G = CI.subgraph(new_genes)
-        print "LCC has grown to %d nodes" % (len(max(nx.connected_components(G), key=len)))
-        
+        if verbose:
+            ccs = list(nx.connected_components(G))
+            LCC = max(ccs, key=len)
+            sys.stdout.write("Number of Components: %d\tLCC size: %d\t%d/%d seeds included\r" % (len(ccs),len(LCC),len(set(LCC)& goi_set),len(goi)))
+            sys.stdout.flush()
+       
+
+    if verbose and len(max(nx.connected_components(G), key=len)) >= max_size:
+        print "\nTerminating: Maximum network size reached"
+    elif verbose:
+        print
+
+
     # Return only the largest connected component
     return CI.subgraph(max(nx.connected_components(G), key=len))
+
+def spGraph(goi, CI, max_dist=None, min_pubs=0, filter=False):
+    """Creates a network from genes of interest (GOIs) based on shortest paths.
+    The process begins by creating a subnetwork of interactions just among GOIS.
+    The largest connected component (LCC) of this network is used as the base.
+    Then, for as many iterations as defined, orphaned GOIs will be included that
+    are exactly one interaction away from the LCC.
+
+    Parameters
+    ----------
+    goi : a list of genes of interest (GOIs)
+    
+    CI : the consolidated interactome
+
+    max_dist : If an int, the number of iterations to run the expansion process.
+               If None, the algorithm will continue to expand until it cannot
+               include any more GOIs. (default=None, min=1)
+
+    min_pubs : The minimum number of publications an edge must have to be added to the
+               LCC. Note that this is only for expanding the network, and does not
+               affect the initial LCC made from all the GOIs. (default=0)
+
+    filter : If True, only the edges with the most publications will be used for
+             expansion.
+             If False, all edges connecting orphan nodes will be used. (default=False)
+                
+
+    Returns
+    -------
+    G : A NetworkX Graph of the expanded network
+    """
+
+    # Check that max_dist is acceptable
+    if max_dist is not None and max_dist < 1:
+        raise Exception('max_dist must be a positive integer or None.')
+
+    # Graph structure to eventually be returned
+    G = nx.Graph()
+
+    # Genes to seed with for each iteration
+    seeds = set(goi)
+
+    # Keep track of how many seeds we had in the last iteration
+    seed_tracker = 0
+
+    # Keep track of how many iterations we've had
+    iter_count = 0
+
+    # Keep the loop while the following 3 conditions are *all* met
+    #   - The maximum distance has not been reached (or no maximum distance was provided)
+    #   - The expansion algorithm is still adding new genes
+    #   - There are still orphan nodes left
+    while (maxDist is None or iter_count < maxDist) and seed_tracker < len(seeds) and len(set(goi) - set(G)) > 0:
+        # Keep track of our place, in case a termination value is given
+        iter_count += 1
+
+        # Keep track of the number of seeds
+        seed_tracker = len(seeds)
+
+        # Start by creating a subgraph made of *just* seeds
+        # and only use the LCC
+        G = max(nx.connected_component_subgraphs(CI.subgraph(goi), key=len))
+
+        # Identify the orphaned GOIs
+        orphans = set(goi) - set(G)
+        # Also keep track of the included GOIs
+        included = set(G)
+
+        # Try to include each orphan...
+        for source in orphans:
+            # ... by finding paths to any gene already in the network
+            for target in included:
+                # If we are only including the most confident expandable edges
+                if filter:
+                    best_linkers = []
+                    most_pubs = min_pubs
+                    for linker in set(CI[source]) & set(CI[target]):
+                        pubs = CI[source][linker]['publications']
+                        if pubs > most_pubs:
+                            best_linkers = [linker]
+                        elif pubs == most_pubs:
+                            best_linkers.append(linker)
+                    seeds.update(best_linkers) 
+                # If we are including all expandable edges
+                else:
+                    seeds.update(set(CI[source]) & set(CI[target]))
+
+    return G
+
+def infomapCluster(G):
+    """Computes clusters using the infomap algorithm
+
+    Parameters
+    ----------
+    G : A NetworkX Graph to cluster
+        This object will also be modified. Nodes will gain
+        a new attribute called 'cluster' indicating which
+        cluster it belongs to.
+
+    Returns
+    -------
+    clustDict : A dictionary of clusters to node lists
+    """
+
+    idToNode = G.nodes()
+    nodeToId = {idToNode[i] : i for i in range(len(idToNode))}
+
+    fname = uuid4()
+    with open('/tmp/%s.llf' % (fname),'w') as file:
+        for edge in G.edges():
+            file.write("%d %d 1\n" % (nodeToId[edge[0]], nodeToId[edge[1]]))
+
+    call("Infomap/Infomap --input-format link-list --zero-based-numbering --clu --undirected --silent /tmp/%s.llf /tmp/" % (fname),shell=True)
+
+    clustDict = {}
+    with open('/tmp/%s.clu' % (fname),'r') as file:
+        for line in file:
+            if line[0] == "#":
+                continue
+            id, cluster, flow  = line.strip().split(" ")
+            id = int(id)
+            cluster = int(cluster)
+            G.node[idToNode[id]]['cluster'] = cluster
+            if cluster not in clustDict:
+                clustDict[cluster] = []
+            clustDict[cluster].append(idToNode[id])
+
+    os.remove('/tmp/%s.llf' % (fname))
+    os.remove('/tmp/%s.clu' % (fname))
+
+    return clustDict
+
+def louvainCluster(G):
+    """Computes clusters using the Louvain algorithm
+
+    Parameters
+    ----------
+    G : A NetworkX Graph to cluster
+        This object will also be modified. Nodes will gain
+        a new attribute called 'cluster' indicating which
+        cluster it belongs to.
+
+    Returns
+    -------
+    clustDict : A dictionary of clusters to node lists
+    """
+
+    try:
+        clust = community.best_partition(G)    # attempt louvain method
+    except:
+        clust = {}                # if clustering fails, assign all nodes to the same cluster
+        for x in G:
+            clust[x] = 0
+
+    clustDict = {}
+    for x in clust:
+        G.node[x]['cluster'] = clust[x] # tag nodes by clusterID
+        if clust[x] in clustDict: # rework dictionary
+            clustDict[clust[x]].append(x)
+        else:
+            clustDict[clust[x]] = [x]
+
+    return clustDict
 
 ##### STATISTIC METHODS ######
 def fishers(N,n,M,x):
