@@ -1,5 +1,6 @@
 from fisher import pvalue
-from subprocess import call
+#from subprocess import call
+import subprocess
 from uuid import uuid4
 import MySQLdb
 import community
@@ -184,7 +185,7 @@ def writeSIF(G, filename, compressed=False):
                 try:
                     file.write("%s\t%s\t%s\n" % (edge[0],edge[1],edge[2]['type']))
                 except KeyError:
-                    file.write("%s\tINTERACTSt%s\n" % (edge[0], edge[1]))
+                    file.write("%s\tINTERACTS\t%s\n" % (edge[0], edge[1]))
     
 ###### ADDITIONAL DATA FILE INPUT #######
 def readTargetScanFile(filename, species_code="9606"):
@@ -402,7 +403,7 @@ def pruneGraph(G,CI,goi,pmax=0.05):
 
     return P
 
-def extendGraph(goi,CI,max_p=0.05,max_size=None, verbose=False):
+def pvalGraph(goi,CI,max_p=0.05,max_size=None, verbose=False):
     """Uses the Chan lab's original graph extension method utilizing p-value cutoffs.
 
     Parameters
@@ -476,10 +477,11 @@ def extendGraph(goi,CI,max_p=0.05,max_size=None, verbose=False):
             sys.stdout.flush()
        
 
-    if verbose and len(max(nx.connected_components(G), key=len)) >= max_size:
-        print "\nTerminating: Maximum network size reached"
-    elif verbose:
-        print
+    if verbose:
+        if len(max(nx.connected_components(G), key=len)) >= max_size:
+            print "\nTerminating: Maximum network size reached"
+        else:
+            print
 
 
     # Return only the largest connected component
@@ -504,7 +506,8 @@ def spGraph(goi, CI, max_dist=None, min_pubs=0, filter=False):
 
     min_pubs : The minimum number of publications an edge must have to be added to the
                LCC. Note that this is only for expanding the network, and does not
-               affect the initial LCC made from all the GOIs. (default=0)
+               affect the initial LCC made from all the GOIs. This also only
+               has an effect if filter is True. (default=0)
 
     filter : If True, only the edges with the most publications will be used for
              expansion.
@@ -536,7 +539,7 @@ def spGraph(goi, CI, max_dist=None, min_pubs=0, filter=False):
     #   - The maximum distance has not been reached (or no maximum distance was provided)
     #   - The expansion algorithm is still adding new genes
     #   - There are still orphan nodes left
-    while (maxDist is None or iter_count < maxDist) and seed_tracker < len(seeds) and len(set(goi) - set(G)) > 0:
+    while (max_dist is None or iter_count < max_dist) and seed_tracker < len(seeds) and len(set(goi) - set(G)) > 0:
         # Keep track of our place, in case a termination value is given
         iter_count += 1
 
@@ -545,7 +548,7 @@ def spGraph(goi, CI, max_dist=None, min_pubs=0, filter=False):
 
         # Start by creating a subgraph made of *just* seeds
         # and only use the LCC
-        G = max(nx.connected_component_subgraphs(CI.subgraph(goi), key=len))
+        G = max(nx.connected_component_subgraphs(CI.subgraph(seeds)), key=len)
 
         # Identify the orphaned GOIs
         orphans = set(goi) - set(G)
@@ -593,10 +596,18 @@ def infomapCluster(G):
 
     fname = uuid4()
     with open('/tmp/%s.llf' % (fname),'w') as file:
-        for edge in G.edges():
-            file.write("%d %d 1\n" % (nodeToId[edge[0]], nodeToId[edge[1]]))
+        for edge in G.edges(data=True):
+            file.write("%d %d %d\n" % (nodeToId[edge[0]], nodeToId[edge[1]], edge[2]['publications']))
 
-    call("Infomap/Infomap --input-format link-list --zero-based-numbering --clu --undirected --silent /tmp/%s.llf /tmp/" % (fname),shell=True)
+    proc = subprocess.Popen([
+            "/home/HandenA/extend_network/Infomap/Infomap.exe",
+            "--input-format", "link-list",
+            "--zero-based-numbering",
+            "--clu",
+            "--undirected",
+            "--silent",
+            "/tmp/%s.llf" % (fname),
+            "/tmp/"]).wait()
 
     clustDict = {}
     with open('/tmp/%s.clu' % (fname),'r') as file:
@@ -707,5 +718,3 @@ def pValMIR(miR,NET,TS,CI):
     p = fishers(N,n,M,x)
 
     return (p,x)
-    
-#def
