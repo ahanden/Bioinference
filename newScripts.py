@@ -1,5 +1,4 @@
 from fisher import pvalue
-#from subprocess import call
 import subprocess
 from uuid import uuid4
 import MySQLdb
@@ -7,6 +6,9 @@ import community
 import networkx as nx
 import os
 import sys
+
+from time import time
+import random
 
 ####### NETWORK LOADING FUNCTIONS #########
 def readDB(conn,min_pubs=0):
@@ -487,94 +489,135 @@ def pvalGraph(goi,CI,max_p=0.05,max_size=None, verbose=False):
     # Return only the largest connected component
     return CI.subgraph(max(nx.connected_components(G), key=len))
 
-def spGraph(goi, CI, max_dist=None, min_pubs=0, filter=False):
-    """Creates a network from genes of interest (GOIs) based on shortest paths.
-    The process begins by creating a subnetwork of interactions just among GOIS.
-    The largest connected component (LCC) of this network is used as the base.
-    Then, for as many iterations as defined, orphaned GOIs will be included that
-    are exactly one interaction away from the LCC.
 
-    Parameters
-    ----------
-    goi : a list of genes of interest (GOIs)
-    
+def spGraph(goi, CI, iters=1000, prune=True):
+    """Creates a pruned, expanded network from the spNodes function.
+    This method takes the nodes from spNodes, given the goi list and
+    the CI graph, and removes extraneous nodes and edges. Using Monte
+    Carlo estimation, p-values are assigned to all edges in the graph.
+    Edges that are not statistically significant are then pruned to
+    reduce potential noise and to make clustering easier.
+
+    Paramters
+    ---------
+    goi : a list of genes of interest
+
     CI : the consolidated interactome
 
-    max_dist : If an int, the number of iterations to run the expansion process.
-               If None, the algorithm will continue to expand until it cannot
-               include any more GOIs. (default=None, min=1)
+    iters : the number of iterations to use for Monte Carlo estimation.
+            A large number of iterations increases accuracy of p-values,
+            but also takes longer to run. (default=1000)
 
-    min_pubs : The minimum number of publications an edge must have to be added to the
-               LCC. Note that this is only for expanding the network, and does not
-               affect the initial LCC made from all the GOIs. This also only
-               has an effect if filter is True. (default=0)
-
-    filter : If True, only the edges with the most publications will be used for
-             expansion.
-             If False, all edges connecting orphan nodes will be used. (default=False)
-                
+    prune : by default, this method will use the Monte Carlo method to
+            prune the graph. However, if you just want a subgraph of
+            the nodes from spNodes, change this parameter to False.
+            (default=True)
 
     Returns
     -------
-    G : A NetworkX Graph of the expanded network
+    G : an expanded NetworkX Graph
+    """
+ 
+    # The maximum frequency we can have
+    #max_freq = iters * max_p
+
+    # Create the spGraph for the GOIs
+    G = CI.subgraph(spGraph(goi,CI))
+    if not prune:
+        return G
+
+    # Use Monte Carlo estimation to prune edges
+    genes = CI.nodes()
+    n = len(goi)
+    for i in range(iters):
+        sys.stdout.write("%d/%d\r" % (i+1, iters))
+        sys.stdout.flush()
+        # Create an spGraph from random genes
+        random.shuffle(genes)
+        O = spGraph(genes[:n],CI)
+
+        #for edge in O.edges():
+        for edge in G.subgraph(O).edges():
+            # Count the frequency by which each edge
+            # in G appears at random
+            node1, node2 = edge
+            if 'pval' in G[node1][node2]:
+                G[node1][node2]['pval'] += 1
+                # If an edge appears too pvaluently, prune it
+                #if G[node1][node2]['pval'] >= max_pval:
+                #    G.remove_edge(*edge)
+            else:
+                G[node1][node2]['pval'] = 1
+    print
+
+    edges= G.edges(data=True)
+    #for edge in G.edges(data=True):
+    for edge in edges:
+        if 'pval' in edge[2]:
+            edge[2]['pval'] = (1 + edge[2]['pval']) / float(iters + 1)
+            if edge[2]['pval'] >= 0.05:
+                G.remove_edge(*edge[:2])
+        else:
+            edge[2]['pval'] = 1 / float(iters + 1)
+
+    return max(nx.connected_component_subgraphs(G), key=len)
+
+def spNodes(goi, CI):
+    """Generates a list of nodes expanded from genes of interest (GOI). The
+    process starts by selecting the largest group of GOI that interact with
+    each other. From there, each non-connected GOI attempts to connect using
+    at most 1 linker genes (i.e. GOI <-> Linker <-> GOI). This process is
+    repeated until either all the GOI are included or there are no more GOI
+    that are only 1 linker gene away.
+
+    Parameters
+    ----------
+    goi : a list of genes of interest
+
+    CI :  the consolidated interactome to take interactions from
+
+    Returns
+    -------
+    nodes : an expanded list of nodes related to the genes of interest
     """
 
-    # Check that max_dist is acceptable
-    if max_dist is not None and max_dist < 1:
-        raise Exception('max_dist must be a positive integer or None.')
+    # Nodes to return
+    nodes = set(max(nx.connected_components(CI.subgraph(goi)), key=len))
 
-    # Graph structure to eventually be returned
-    G = nx.Graph()
+    # Keep track of which targets need to be visited
+    this_level = None
+    next_level = nodes.copy()
 
-    # Genes to seed with for each iteration
-    seeds = set(goi)
+    # Keep track of orphans
+    orphans = set(goi) - next_level
 
-    # Keep track of how many seeds we had in the last iteration
-    seed_tracker = 0
+    # Iterate until we run out of orphans, or we run out of connections
+    while next_level and next_level:
+        this_level = next_level
+        next_level = set()
 
-    # Keep track of how many iterations we've had
-    iter_count = 0
+        # Try to link each orphan to connected nodes
+        for orphan in orphans:
 
-    # Keep the loop while the following 3 conditions are *all* met
-    #   - The maximum distance has not been reached (or no maximum distance was provided)
-    #   - The expansion algorithm is still adding new genes
-    #   - There are still orphan nodes left
-    while (max_dist is None or iter_count < max_dist) and seed_tracker < len(seeds) and len(set(goi) - set(G)) > 0:
-        # Keep track of our place, in case a termination value is given
-        iter_count += 1
+            # To decrease lookup time, store the partners now
+            partners = set(CI[orphan])
 
-        # Keep track of the number of seeds
-        seed_tracker = len(seeds)
+            # Try to connect orphan to any/all nodes in the LCC
+            # (So long as we haven't already tried)
+            for target in this_level:
+                linkers = partners & set(CI[target])
+                # If we made a successful link
+                if linkers:
+                    # Add the linker genes and orphan to the next leve
+                    next_level.update(linkers)
+                    next_level.add(orphan)
+                    # And flag the linker to be removed
 
-        # Start by creating a subgraph made of *just* seeds
-        # and only use the LCC
-        G = max(nx.connected_component_subgraphs(CI.subgraph(seeds)), key=len)
+        orphans -= next_level
+        nodes.update(next_level)
 
-        # Identify the orphaned GOIs
-        orphans = set(goi) - set(G)
-        # Also keep track of the included GOIs
-        included = set(G)
+    return nodes
 
-        # Try to include each orphan...
-        for source in orphans:
-            # ... by finding paths to any gene already in the network
-            for target in included:
-                # If we are only including the most confident expandable edges
-                if filter:
-                    best_linkers = []
-                    most_pubs = min_pubs
-                    for linker in set(CI[source]) & set(CI[target]):
-                        pubs = CI[source][linker]['publications']
-                        if pubs > most_pubs:
-                            best_linkers = [linker]
-                        elif pubs == most_pubs:
-                            best_linkers.append(linker)
-                    seeds.update(best_linkers) 
-                # If we are including all expandable edges
-                else:
-                    seeds.update(set(CI[source]) & set(CI[target]))
-
-    return G
 
 def infomapCluster(G):
     """Computes clusters using the infomap algorithm

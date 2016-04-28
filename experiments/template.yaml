@@ -1,0 +1,37 @@
+# This is meant to be a template for future experiments run with run_experiment.py
+
+database : # The database to get interaction data from (REQUIRED)
+    name     : # Database name
+    user     : # MySQL user name
+    password : # MySQL password
+
+interactome : # The interactome (REQUIRED)
+    format   : # (database|GML|TSV|SIF)
+    file     : # The file to read from (not necessary if using a database)  
+    min_pubs : # Edge confidence, must be >= 0 (default=0, only for database format)
+    output   : # Writing the interactome to file (optional)
+        format : # (GML|TSV|SIF)
+        file   : # an output file name
+
+gois : # Genes of interest (REQUIRED)
+    file             : # A file to read from
+    label_file       : # A file name to write a Cytoscape feature file to for labeling (Optional)
+    true_orphan_file : # A file to write the IDs of any gene that has zero interactions in the given interactome (Optional)
+
+expansion : # How we created an expanded network from the GOIs (REQUIRED)
+    output : # Writing the expanded network to file (optional)
+        format : # (GML|TSV|SIF)
+        file   : # Output file name
+    method : # Either sp for shortest paths, or pval for fishers expansion
+    # Shortest paths options (all optional)
+    prune : # Whether to prune the network (default is to prune)
+    iters : # The number of iterations to use for pruning (default is 1000)
+    # Fishers expansion options (all optional)
+    max_p    : # Maximum p-value a gene can have to be considered (defaults to 0.05)
+    max_size : # The maximum size of the expanded interactome (defaults to 2 times the number of GOIs)
+    verbose  : # Whether to write progress to STDOUT (defaults to False)
+
+clustering: # How to cluster the expanded network (OPTIONAL)
+    method : # (infomap|louvain)
+    file   : # Output file name (optional)
+

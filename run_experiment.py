@@ -3,12 +3,15 @@
 # Performs an experiment and offers DETAILED documentation
 
 from time import strftime
-import collections
 import MySQLdb
 import networkx as nx
 import newScripts as ns
 import sys
 import yaml
+
+# Returns the average degree of a graph
+def avgDegree(G):
+    return sum(len(G[n]) for n in G)/float(len(G))
 
 # Reads gene symbols from a file
 def readGeneFile(fname,conn):
@@ -138,14 +141,13 @@ if 'method' not in args['expansion']:
     sys.exit(1)
 
 elif args['expansion']['method'] == 'sp':
-    max_dist = args['expansion'].get('max_dist', None)
-    min_pubs = args['expansion'].get('min_pubs', 0)
-    filter   = args['expansion'].get('filter',   False)
+    prune = args['expansion'].get('prune', True)
+    iters = args['expansion'].get('iters', 1000)
 
     print "Expanded network using shortest paths method"
     print "Expansion parameters: max_dist=%s, min_pubs=%d, filter=%s" % (max_dist, min_pubs, filter)
 
-    G = ns.spGraph(seeds, CI, max_dist = max_dist, min_pubs = min_pubs, filter = filter)
+    G = ns.spGraph(seeds, CI, prune=prune, iters=iters)
 
 elif args['expansion']['method'] == 'pval':
     max_p    = args['expansion'].get('max_p',    0.05)
@@ -161,7 +163,7 @@ else:
     sys.stderr.write("Error: %s is an unrecognized expansion method - must be either pval or sp\n" % (args['expansion']['method']))
     sys.exit(1)
 
-print "Expanded network stats: %d nodes and %d edges. %d/%d GOIs included in the network." % (len(G), len(G.edges()), len(gois & set(G)), len(gois))
+print "Expanded network stats: %d nodes and %d edges and average degree %f. %d/%d GOIs included in the network." % (len(G), len(G.edges()), avgDegree(G), len(gois & set(G)), len(gois))
 print
 
 # Write the expanded network to file
@@ -210,3 +212,9 @@ if 'file' in args['clustering']:
         file.write("Node\tCluster\n")
         for node in G.nodes(data=True):
             file.write("%d\t%d\n" % (node[0],node[1]['cluster']))
+
+##################### CLEAN UP##################
+with open('pvals.tsv','w') as file:
+    file.write("Edge\tPvalue\n")
+    for edge in G.edges(data=True):
+        file.write("%d (INTERACTS) %d\t%f\n" % (edge[0],edge[1],edge[2]['pval']))
