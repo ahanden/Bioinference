@@ -20,18 +20,21 @@ gois : # Genes of interest (REQUIRED)
 
 expansion : # How we created an expanded network from the GOIs (REQUIRED)
     output : # Writing the expanded network to file (optional)
-        format : # (GML|TSV|SIF)
-        file   : # Output file name
+        format     : # (GML|TSV|SIF)
+        graph_file : # Output file name
+        pval_file  : # Writes the p-value of edges (only for sp expansion)
     method : # Either sp for shortest paths, or pval for fishers expansion
     # Shortest paths options (all optional)
-    prune : # Whether to prune the network (default is to prune)
-    iters : # The number of iterations to use for pruning (default is 1000)
+    prune   : # Whether to prune the network (default is to prune
+    iters   : # The number of iterations to use for pruning (default is 1000)
+    verbose : # If True, will output Monte Carlo progress to STDERR
     # Fishers expansion options (all optional)
     max_p    : # Maximum p-value a gene can have to be considered (defaults to 0.05)
     max_size : # The maximum size of the expanded interactome (defaults to 2 times the number of GOIs)
     verbose  : # Whether to write progress to STDOUT (defaults to False)
 
-clustering: # How to cluster the expanded network (OPTIONAL)
+clustering : # How to cluster the expanded network (OPTIONAL)
     method : # (infomap|louvain)
+    weight : # If True, the clustering will assign edge weights based on the number of publications validating each interaction.
     file   : # Output file name (optional)
 

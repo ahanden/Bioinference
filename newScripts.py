@@ -29,7 +29,6 @@ def readDB(conn,min_pubs=0):
     cursor.execute("SELECT entrez_id1, entrez_id2 FROM interactions")
     cursor.execute("SELECT MAX(counted) FROM (SELECT COUNT(pubmed_id) AS counted FROM publications GROUP BY int_id) AS x")
     max_pubs = cursor.fetchone()[0]
-    #cursor.execute("SELECT entrez_id1, entrez_id2, count(pubmed_id) FROM interactions LEFT JOIN publications ON interactions.int_id = publications.int_id GROUP BY interactions.int_id")
     cursor.execute("SELECT entrez_id1, entrez_id2, count(pubmed_id) FROM interactions LEFT JOIN publications ON interactions.int_id = publications.int_id GROUP BY interactions.int_id HAVING count(pubmed_id) >= %s", [min_pubs])
     for row in cursor.fetchall():
         if(int(row[2]) >= min_pubs):
@@ -490,7 +489,7 @@ def pvalGraph(goi,CI,max_p=0.05,max_size=None, verbose=False):
     return CI.subgraph(max(nx.connected_components(G), key=len))
 
 
-def spGraph(goi, CI, iters=1000, prune=True):
+def spGraph(goi, CI, iters=1000, prune=True, verbose=False):
     """Creates a pruned, expanded network from the spNodes function.
     This method takes the nodes from spNodes, given the goi list and
     the CI graph, and removes extraneous nodes and edges. Using Monte
@@ -513,6 +512,9 @@ def spGraph(goi, CI, iters=1000, prune=True):
             the nodes from spNodes, change this parameter to False.
             (default=True)
 
+    verbose : if True, will print progress of Monte Carlo estimation
+              to STDERR. (default=False)
+
     Returns
     -------
     G : an expanded NetworkX Graph
@@ -522,7 +524,7 @@ def spGraph(goi, CI, iters=1000, prune=True):
     #max_freq = iters * max_p
 
     # Create the spGraph for the GOIs
-    G = CI.subgraph(spGraph(goi,CI))
+    G = CI.subgraph(spNodes(goi,CI))
     if not prune:
         return G
 
@@ -530,11 +532,12 @@ def spGraph(goi, CI, iters=1000, prune=True):
     genes = CI.nodes()
     n = len(goi)
     for i in range(iters):
-        sys.stdout.write("%d/%d\r" % (i+1, iters))
-        sys.stdout.flush()
+        if verbose:
+            sys.stderr.write("%d/%d\r" % (i+1, iters))
+            sys.stderr.flush()
         # Create an spGraph from random genes
         random.shuffle(genes)
-        O = spGraph(genes[:n],CI)
+        O = spNodes(genes[:n],CI)
 
         #for edge in O.edges():
         for edge in G.subgraph(O).edges():
@@ -548,17 +551,34 @@ def spGraph(goi, CI, iters=1000, prune=True):
                 #    G.remove_edge(*edge)
             else:
                 G[node1][node2]['pval'] = 1
-    print
+    if verbose:
+        sys.stderr.write("\n")
 
-    edges= G.edges(data=True)
-    #for edge in G.edges(data=True):
+    # Calculate p-values
+    edges = G.edges(data=True)
     for edge in edges:
         if 'pval' in edge[2]:
             edge[2]['pval'] = (1 + edge[2]['pval']) / float(iters + 1)
-            if edge[2]['pval'] >= 0.05:
-                G.remove_edge(*edge[:2])
+            #if edge[2]['pval'] >= 0.05:
+            #    G.remove_edge(*edge[:2])
         else:
             edge[2]['pval'] = 1 / float(iters + 1)
+
+    # Start pruning
+    edges.sort(key=lambda x: x[2]['pval'], reverse=True)
+    for edge in edges:
+        # Stop if we've pruned all insignificant edges
+        if edge[2]['pval'] < 0.05:
+            break
+
+        # Check to see if pruning this edge makes a GOI orphan
+        if edge[0] in goi and len(G[edge[0]]) == 1:
+            break
+        if edge[1] in goi and len(G[edge[1]]) == 1:
+            break
+
+        # Otherwise, remove the insignificant edge
+        G.remove_edge(*edge[:2])
 
     return max(nx.connected_component_subgraphs(G), key=len)
 
@@ -619,7 +639,7 @@ def spNodes(goi, CI):
     return nodes
 
 
-def infomapCluster(G):
+def infomapCluster(G, weight_feature=None):
     """Computes clusters using the infomap algorithm
 
     Parameters
@@ -628,6 +648,10 @@ def infomapCluster(G):
         This object will also be modified. Nodes will gain
         a new attribute called 'cluster' indicating which
         cluster it belongs to.
+
+    weight_feature : If given, infomap will add edge weights
+                     from the given feature found in G.
+                     (default=None)
 
     Returns
     -------
@@ -640,7 +664,10 @@ def infomapCluster(G):
     fname = uuid4()
     with open('/tmp/%s.llf' % (fname),'w') as file:
         for edge in G.edges(data=True):
-            file.write("%d %d %d\n" % (nodeToId[edge[0]], nodeToId[edge[1]], edge[2]['publications']))
+            if weight_feature is None:
+                file.write("%d %d 1\n" % (nodeToId[edge[0]], nodeToId[edge[1]]))
+            else:
+                file.write("%d %d %d\n" % (nodeToId[edge[0]], nodeToId[edge[1]], edge[2][weight_feature]))
 
     proc = subprocess.Popen([
             "/home/HandenA/extend_network/Infomap/Infomap.exe",
