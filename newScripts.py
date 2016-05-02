@@ -10,6 +10,91 @@ import sys
 from time import time
 import random
 
+####### GENE ID LOOKUP FUNCTIONS #########
+def checkEID(cursor, eid):
+    """Returns a valid Entrez ID given an uncertain Entrez ID.
+
+    Entrez IDs may, from time to time, be discontinued for many
+    reasons. This method interfaces with the gene database to 
+    check that a given Entrez ID is still valid, or to find what
+    the current valid Entrez ID is for an old, discontinued ID.
+
+    Paramters
+    ---------
+    cursor : a MySQL cursor to the gene database
+
+    eid : An Entrez ID
+
+    Returns
+    -------
+    valid_eids : A set of valid Entrez IDs. The list will be
+                 empty if no valid IDs were found.
+    """
+
+    valid_eids = set()
+    cursor.execute("SELECT EXISTS(SELECT * FROM genes WHERE entrez_id = %(eid)s)", {'eid': eid})
+    if cursor.fetchone()[0] == 1:
+        valid_eids.add(eid)
+    else:
+        cursor.execute("SELECT entrez_id FROM discontinued_genes WHERe discontinued_id = %(eid)s", {'eid': eid})
+        valid_eids.update([row[0] for row in cursor.fetchall()])
+   
+    return valid_eids
+
+def getEID(cursor, symbol):
+    """Returns a valid Entrez ID given a gene symbol.
+
+    Paramters
+    ---------
+    cursor : a MySQL cursor to the gene database
+
+    symbol : a gene symbol to convert
+
+    Returns
+    -------
+    eids : a set of Entrez IDs - which will be empty if no valid IDs were found.
+    """
+
+    # Start with a direct query
+    cursor.execute("SELECT entrez_id FROM genes WHERE symbol = %s", (symbol))
+    eids = [row[0] for row in cursor.fetchall()]
+
+    # If that didn't work, search for a discotninued symbol
+    if not eids:
+        cursor.execute("SELECT entrez_id FROM discontinued_genes WHERE discontinued_symbol = %s", (symbol))
+        eids = [row[0] for row in cursor.fetchall()]
+
+        # if THAT didn't work, search for synonyms
+        if not eids:
+            cursor.execute("SELECT entrez_id FROM gene_synonyms WHERE symbol = %s", (symbol))
+            eids = [row[0] for row in cursor.fetchall()]
+
+    # Return whatever we found (if anything)
+    return set(eids)
+
+def getSymbol(cursor, eid):
+    """Returns a valid gene symbol given an Entrez ID.
+
+    Paramters
+    ---------
+    cursor : a MySQL cursor to the gene database
+
+    eid : An Entrez ID
+
+    Returns
+    -------
+    symbols : a set of symbols - which will be empty if no valid symbols were found.
+    """
+
+    valid_eids = checkEID(cursor, eid)
+    symbols = set()
+    for gene in valid_eids:
+        cursor.execute("SELECT symbol FROM genes WHERE entrez_id = %(eid)s AND symbol IS NOT NULL", {'eid': gene})
+        symbols.update([row[0] for row in cursor.fetchall()])
+
+    return symbols
+    
+
 ####### NETWORK LOADING FUNCTIONS #########
 def readDB(conn,min_pubs=0):
     """Reads interactions into a NetworkX graph from a MySQL database
@@ -189,11 +274,50 @@ def writeSIF(G, filename, compressed=False):
                     file.write("%s\tINTERACTS\t%s\n" % (edge[0], edge[1]))
     
 ###### ADDITIONAL DATA FILE INPUT #######
-def readTargetScanFile(filename, species_code="9606"):
+def readGMTFile(conn, filename):
+    """Reads gene sets relating to pathways or otehr annotations from
+    a GMT formatted file.
+
+    Note: This method reads a GMT formatted file as downloaded from
+    GSEA's annotation portal - which is NOT actual GMT format.
+
+    Paramters
+    ---------
+    conn : a MySQL connection to the gene database
+
+    filename : a GMT file location
+
+    Returns
+    -------
+    gmt : a dictionary of pathways IDs to Entrez IDs
+    """
+
+    cursor = conn.cursor()
+    gmt = {}
+    eid_cache = {}
+    with open(filename,'r') as file:
+        for line in file:
+            cols = line.strip().split("\t")
+
+            pathway_name = cols[0]
+            pathway_ulr  = cols[1]
+            genes        = cols[2:]
+
+            gmt[pathway_name] = set()
+
+            for gene in genes:
+                gmt[pathway_name].update(checkEID(cursor,gene))
+
+    return gmt
+
+
+def readTargetScanFile(conn, filename, species_code=9606):
     """Reads data from a Target Scan output file into memory.
 
     Parameters
     ----------
+    conn : a MySQL connection
+
     filename : A file location
     
     species_code : Which species to filter for (default=9606).
@@ -206,17 +330,22 @@ def readTargetScanFile(filename, species_code="9606"):
     """
     
     TS = {}
-    species_code = str(species_code)
+    cursor = conn.cursor()
 
     with open(filename) as file:
         for line in file:
-            (mirna, garbage, target, garbage, species) = line.strip().split("\t")
+            (mirna, target_eid, target_symbol, transcript, species) = line.strip().split("\t")
             
-            if species_code == "None" or species == species_code:
+            cursor.execute("SELECT EXISTS(SELECT * FROM genes WHERE entrez_id = %s)", (target_eid))
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("SELECT entrez_id FROM discontinued_genes WHERE discontinued_id = %s", (target_eid))
+                target_eid = cursor.fetchone()[0]
+
+            if species_code is None or species == species_code:
                 if mirna in TS:
-                    TS[mirna][target] = True
+                    TS[mirna][target_eid] = True
                 else:
-                    TS[mirna] = {target: True}
+                    TS[mirna] = {target_eid: True}
     
     # Clean up formatting
     for mirna in TS:
@@ -246,7 +375,7 @@ def getPartners(nodes,CI,depth=1):
     next_level = {node: True for node in set(nodes) & set(CI)}
     visited = {}
         
-    for i in range(depth):
+    for i in xrange(depth):
         if not next_level:
             break
         this_level = next_level
@@ -531,7 +660,7 @@ def spGraph(goi, CI, iters=1000, prune=True, verbose=False):
     # Use Monte Carlo estimation to prune edges
     genes = CI.nodes()
     n = len(goi)
-    for i in range(iters):
+    for i in xrange(iters):
         if verbose:
             sys.stderr.write("%d/%d\r" % (i+1, iters))
             sys.stderr.flush()
@@ -559,8 +688,6 @@ def spGraph(goi, CI, iters=1000, prune=True, verbose=False):
     for edge in edges:
         if 'pval' in edge[2]:
             edge[2]['pval'] = (1 + edge[2]['pval']) / float(iters + 1)
-            #if edge[2]['pval'] >= 0.05:
-            #    G.remove_edge(*edge[:2])
         else:
             edge[2]['pval'] = 1 / float(iters + 1)
 
@@ -659,7 +786,7 @@ def infomapCluster(G, weight_feature=None):
     """
 
     idToNode = G.nodes()
-    nodeToId = {idToNode[i] : i for i in range(len(idToNode))}
+    nodeToId = {idToNode[i] : i for i in xrange(len(idToNode))}
 
     fname = uuid4()
     with open('/tmp/%s.llf' % (fname),'w') as file:
@@ -753,17 +880,15 @@ def fishers(N,n,M,x):
     tn = N - tp - fp - fn
     return pvalue(tp,fp,fn,tn).right_tail
     
-def pValMIR(miR,NET,TS,CI):
+def pValMIR(targets,NET,CI):
     """Finds the TargetScan targets for a given miRNA found in a given
     network and the consolidated interactome.
 
     Parameters
     ----------
-    miR : miRNA family
+    targets : the genes the miRNA targets
     
     NET : the network
-    
-    TS : TargetScan dictionary
     
     CI : The consolidated interactome
     
@@ -778,7 +903,7 @@ def pValMIR(miR,NET,TS,CI):
     Switch to more efficient hypergeometric library.
     """
 
-    targpool = set(TS[miR]) & set(CI)
+    targpool = set(targets) & set(CI)
 
     N = len(CI)                        # population size
     n = len(targpool)                # successes in population
