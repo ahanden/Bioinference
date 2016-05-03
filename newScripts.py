@@ -1,14 +1,14 @@
 from fisher import pvalue
-import subprocess
+from math import log
 from uuid import uuid4
 import MySQLdb
 import community
 import networkx as nx
 import os
-import sys
-
-from time import time
 import random
+import re
+import subprocess
+import sys
 
 ####### GENE ID LOOKUP FUNCTIONS #########
 def checkEID(cursor, eid):
@@ -56,17 +56,18 @@ def getEID(cursor, symbol):
     """
 
     # Start with a direct query
-    cursor.execute("SELECT entrez_id FROM genes WHERE symbol = %s", (symbol))
+    args = {"symbol": symbol}
+    cursor.execute("SELECT entrez_id FROM genes WHERE symbol = %(symbol)s", args)
     eids = [row[0] for row in cursor.fetchall()]
 
     # If that didn't work, search for a discotninued symbol
     if not eids:
-        cursor.execute("SELECT entrez_id FROM discontinued_genes WHERE discontinued_symbol = %s", (symbol))
+        cursor.execute("SELECT entrez_id FROM discontinued_genes WHERE discontinued_symbol = %(symbol)s", args)
         eids = [row[0] for row in cursor.fetchall()]
 
         # if THAT didn't work, search for synonyms
         if not eids:
-            cursor.execute("SELECT entrez_id FROM gene_synonyms WHERE symbol = %s", (symbol))
+            cursor.execute("SELECT entrez_id FROM gene_synonyms WHERE symbol = %(symbol)s", args)
             eids = [row[0] for row in cursor.fetchall()]
 
     # Return whatever we found (if anything)
@@ -93,7 +94,25 @@ def getSymbol(cursor, eid):
         symbols.update([row[0] for row in cursor.fetchall()])
 
     return symbols
+   
+def crossQuery(cursor, db, id):
+    """Returns valid Entrez IDs given a foreign database and identifier.
+
+    Paramters
+    ---------
+    cursor : a MySQL cursor to the gene database
+
+    db : the name of the external database
+
+    id : the foregin identifier
+
+    Returns
+    -------
+    eids : a list of matching Entrez IDs - which will be empty if no matching ids were found.
+    """
     
+    cursor.execute("SELECT entrez_id FROM gene_xrefs WHERE Xref_db = %(db)s AND Xref_id = %(id)s", {'db': db, 'id': id})
+    return [row[0] for row in cursor.fetchall()]
 
 ####### NETWORK LOADING FUNCTIONS #########
 def readDB(conn,min_pubs=0):
@@ -184,21 +203,22 @@ def readSIF(filename):
     with open(filename,'r') as file:
         delimiter = " "
         
-        line = file[0]    
-        if "\t" in line:
-            delimiter = "\t"
             
         for line in file:
+            if "\t" in line:
+                delimiter = "\t"
+
             fields = line.strip().split(delimiter)
-            
+
             if len(fields) < 3:
                 raise IndexError('The SIF file is improperly formatted. Visit http://wiki.cytoscape.org/Cytoscape_User_Manual/Network_Formats')
             
-            eid1 = fields.pop(0)
+            eid1 = int(fields.pop(0))
             type = fields.pop(0)
             
             for eid2 in fields:
                 if eid1 != eid2:
+                    eid2 = int(eid2)
                     G.add_edge(eid1, eid2, type=type)
     return G
 
@@ -331,21 +351,32 @@ def readTargetScanFile(conn, filename, species_code=9606):
     
     TS = {}
     cursor = conn.cursor()
+    p = re.compile('(ENSG\d+)\.?')
 
     with open(filename) as file:
+        next(file) # Skip the header
         for line in file:
-            (mirna, target_eid, target_symbol, transcript, species) = line.strip().split("\t")
-            
-            cursor.execute("SELECT EXISTS(SELECT * FROM genes WHERE entrez_id = %s)", (target_eid))
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("SELECT entrez_id FROM discontinued_genes WHERE discontinued_id = %s", (target_eid))
-                target_eid = cursor.fetchone()[0]
+            fields = line.strip().split("\t")
 
-            if species_code is None or species == species_code:
-                if mirna in TS:
-                    TS[mirna][target_eid] = True
-                else:
-                    TS[mirna] = {target_eid: True}
+            mirna         = fields[0]
+            target_id     = fields[1]
+            target_symbol = fields[2]
+            transcript    = fields[3]
+            species       = int(fields[4])
+           
+            # Skip along if this doesn't meet our filters
+            if species_code is not None and species != species_code:
+                continue
+
+            eids = getEID(cursor, target_symbol)
+            if not eids:
+                m = p.match(target_id)
+                eids = crossQuery(cursor, 'Ensembl', m.group(1)) 
+
+            if eids:
+                if mirna not in TS:
+                    TS[mirna] = {}
+                TS[mirna].update({eid: True for eid in eids})
     
     # Clean up formatting
     for mirna in TS:
@@ -880,36 +911,62 @@ def fishers(N,n,M,x):
     tn = N - tp - fp - fn
     return pvalue(tp,fp,fn,tn).right_tail
     
-def pValMIR(targets,NET,CI):
-    """Finds the TargetScan targets for a given miRNA found in a given
-    network and the consolidated interactome.
+def spanningScores(TS, NET, CI, clusters):
+    """Computes spanning scores for all miRNA.
 
     Parameters
     ----------
-    targets : the genes the miRNA targets
-    
-    NET : the network
-    
-    CI : The consolidated interactome
-    
+    TS : the TargetScan dictionary
+
+    NET : the network to compute scores over
+
+    CI : the consolidated interactome
+
+    clusters : a list of clusters for NET
+
     Returns
     -------
-    p : p-value computed from a hypergeometric distribution
-    
-    x : the size of the overlap
-    
-    TODO
-    ----
-    Switch to more efficient hypergeometric library.
     """
 
-    targpool = set(targets) & set(CI)
+    stats = {}
+    N = len(CI)  # population size
+    M = len(NET) # sample size
 
-    N = len(CI)                        # population size
-    n = len(targpool)                # successes in population
-    M = len(NET)                    # sample size
-    x = len(targpool & set(NET))    # successes in sample
+    data = {}
+    for miR, targets in TS.iteritems():
+        targpool = set(targets) & set(CI) # get target pool
 
-    p = fishers(N,n,M,x)
+        n = len(targpool)                # successes in population
+        x = len(targpool & set(NET))    # successes in sample
 
-    return (p,x)
+        pval = fishers(N,n,M,x)
+        negp = -log(pval)
+        
+        clust_count = sum([1 for cluster in clusters if len(cluster) >3 and set(targets) & set(cluster)])
+
+        data[miR] = {
+            'hits'        : x,
+            'negp'        : negp,
+            'clust_count' : clust_count,
+            'pval'        : pval
+        }
+
+    max_o = float(max([data[miR]['hits']        for miR in data])) # best achieved overlap
+    max_c = float(max([data[miR]['clust_count'] for miR in data])) # best achieved cluster count
+    max_p = float(max([data[miR]['negp']        for miR in data])) # best achieved -log(pval)
+
+    if max_o == 0:
+        raise Exception("There are no miRNA targets in the network")
+    if max_c == 0:
+        raise Exception("There are no miRNA targets in any of the clusters")
+
+    scores = {}
+    for miR, stats in data.iteritems():
+
+        first = stats['negp'] / max_p    # -log(pval) / -log(best_pval) (max = 1)
+        second = stats['clust_count'] / max_c # cluster_count / best_cluster_count (max = 1)
+        third = stats['hits'] / max_o # hit_count / best_hit_count (max = 1)
+
+        scores[miR] = first + second + third    # sum score components (max score = 3)
+
+    return scores
