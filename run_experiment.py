@@ -188,13 +188,13 @@ if method == 'sp':
 
 elif method == 'pval':
     max_p    = args['expansion'].get('max_p',    0.05)
-    max_size = args['expansion'].get('max_size', None)
+    max_size = args['expansion'].get('max_size', 2 * len(gois))
     verbose  = args['expansion'].get('verbose',  False)
 
     print "Expanded network using p-value method"
     print "Expansion parameters: max_p=%f, max_size=%d, verbose=%s" % (max_p, max_size, verbose)
 
-    G = pvalGraph(goi,CI,max_p=0.05,max_size=None, verbose=False)
+    G = ns.pvalGraph(gois,CI,max_p=0.05,max_size=None, verbose=verbose)
 
 else:
     die("%s is an unrecognized expansion method - must be either pval or sp." % (method))
