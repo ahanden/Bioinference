@@ -1,9 +1,10 @@
 # This is meant to be a template for future experiments run with run_experiment.py
 
-database : # The database to get interaction data from (REQUIRED)
+genes_db : # The database to get gene data from (REQUIRED)
     name     : # Database name
     user     : # MySQL user name
     password : # MySQL password
+
 
 interactome : # The interactome (REQUIRED)
     format   : # (database|GML|TSV|SIF)
@@ -12,6 +13,10 @@ interactome : # The interactome (REQUIRED)
     output   : # Writing the interactome to file (optional)
         format : # (GML|TSV|SIF)
         file   : # an output file name
+    ints_db  : # The database to get interaction data from (Required if loading interactome from database)
+        name     : # Database name
+        user     : # MySQL user name
+        password : # MySQL password
 
 gois : # Genes of interest (REQUIRED)
     file             : # A file to read from
@@ -28,6 +33,7 @@ expansion : # How we created an expanded network from the GOIs (REQUIRED)
     prune   : # Whether to prune the network (default is to prune
     iters   : # The number of iterations to use for pruning (default is 1000)
     verbose : # If True, will output Monte Carlo progress to STDERR
+    max_p   : # The p-value to stop pruning at (default is 0.05)
     # Fishers expansion options (all optional)
     max_p    : # Maximum p-value a gene can have to be considered (defaults to 0.05)
     max_size : # The maximum size of the expanded interactome (defaults to 2 times the number of GOIs)
