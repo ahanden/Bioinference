@@ -46,24 +46,51 @@ def readBIFile(fname, conn=None):
 
     return paths
 
-def mapPaths(eids, paths):
-    """Maps a given set of genes onto a set of paths.
+def monteCarloEnrichment(eids, paths, iters, func, *args):
+    """Computes pathway enrichment using Monte Carlo estimation.
 
     Parameters
     ----------
-    eids : an iterable of Entrez IDs
+    eids : the genes to enrich
 
     paths : a dictionary of paths to sets of Entrez IDs
 
+    iters : the number of iterations to perform for selection
+
+    func : a function to select genes - it must return an
+           iterable of genes.
+
+    *args : arguments to pass to the function
     Returns
     -------
-    matchedPaths : a dictionary of paths to Entrez IDs
+    results : a dictionary with the following structure:
+              { pathway : {
+                  pval,
+                  corr_pval,
+                  genes
+              }
     """
 
     eids = set(eids)
-    return {path : eids & paths[path] for path in paths}
 
-def enrichPathways(eids, paths, N=20000):
+    resuts = {}
+    for path, pop in paths.iteritems():
+        results[path] = {'genes' : eids * pop, 'pval' : 0}
+
+    for i in xrange(iters):
+        sample = set(func(*args))
+        for path, pop in paths.iteritems():
+            if len(sample & pop) >= len(results[path]['genes']):
+                results[path]['pval'] += 1
+
+    for path, vals in results.iteritems():
+        vals['pval'] /= float(iters)
+
+    fdrcorrection(results)
+
+    return results
+
+def fisherEnrichment(eids, paths, N=20000):
     """Computes pathway enrichment using Fisher's Exact Test
     with FDR correction using the Benjamini-Hochberg procedure.
 
@@ -97,7 +124,22 @@ def enrichPathways(eids, paths, N=20000):
         p = pvalue(tp, fp, fn, tn).right_tail
 
         results[path] = {'pval': p, 'genes': sample & pop}
-        
+       
+    fdrcorrection(results)
+
+    return results
+
+def fdrcorrection(results):
+    """Applies Benjamini-Hochberg correction to a results set from
+    one of this script's enrichment functions.
+
+    This method alters the input directly and does not return anything.
+
+    Parameters
+    ----------
+    results : a dictionary with pathways as keys and a dictionary containing
+              a p value as values.
+    """
     sorted_paths = sorted(results.keys(), key=lambda x: results[x]['pval'])
     sorted_pvals = sorted([results[path]['pval'] for path in results])
 
@@ -106,12 +148,11 @@ def enrichPathways(eids, paths, N=20000):
 
     pvals_corrected_raw = [sorted_pvals[i] / ecdffactor[i] for i in xrange(len(sorted_pvals))]
 
-    pvals_corrected = [pvals_corrected_raw[-1]]
+    pvals_corrected =  [pvals_corrected_raw[-1]]
     pvals_corrected += [min(pvals_corrected_raw[i], pvals_corrected_raw[i+1]) for i in xrange(len(pvals_corrected_raw)-2,-1,-1)] 
-    pvals_corrected = pvals_corrected[::-1]
-    pvals_corrected = [p if p < 1 else 1 for p in pvals_corrected]
+    pvals_corrected =  pvals_corrected[::-1]
+    pvals_corrected =  [p if p < 1 else 1 for p in pvals_corrected]
 
     for i in xrange(len(sorted_paths)):
         results[sorted_paths[i]]['corr_pval'] = pvals_corrected[i]
 
-    return results
