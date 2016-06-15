@@ -108,7 +108,7 @@ def getEID(symbol, conn=None):
     cursor.execute("SELECT entrez_id FROM genes WHERE symbol = %(symbol)s", args)
     eids = [row[0] for row in cursor.fetchall()]
 
-    # If that didn't work, search for a discotninued symbol
+    # If that didn't work, search for a discontinued symbol
     if not eids:
         cursor.execute("SELECT entrez_id FROM discontinued_genes WHERE discontinued_symbol = %(symbol)s", args)
         eids = [row[0] for row in cursor.fetchall()]
