@@ -1,6 +1,7 @@
 from fisher import pvalue
 from random import shuffle
 import networkx as nx
+import sys
 
 def prunedGraph(GO, CI, pmax=0.05, G=None):
     """Creates am expanded graph of nodes that are significantly connected to genes of
@@ -163,7 +164,8 @@ def cottrillGraph(goi, CI, max_p=0.05, max_size=None, verbose=False):
         new_genes.update(best_genes['nodes'])
         G = CI.subgraph(new_genes)
         if verbose:
-            LCC = max(nx.connected_components(G), key=len)
+            ccs = list(nx.connected_components(G))
+            LCC = max(ccs, key=len)
             sys.stdout.write("Number of Components: %d\tLCC size: %d\t%d/%d seeds included\r" % (len(ccs),len(LCC),len(set(LCC)& goi_set),len(goi)))
             sys.stdout.flush()
        

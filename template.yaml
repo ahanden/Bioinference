@@ -38,9 +38,24 @@ expansion : # How we created an expanded network from the GOIs (REQUIRED)
     max_p    : # Maximum p-value a gene can have to be considered (defaults to 0.05)
     max_size : # The maximum size of the expanded interactome (defaults to 2 times the number of GOIs)
     verbose  : # Whether to write progress to STDOUT (defaults to False)
+    # Enrichment analysis on the network (OPTIONAL)
+    enrichment :
+        method : # (monte|fisher) Default is Fisher
+        sims   : # Only necessary if using monte carlo method. Default is 1000
+        pop    : # Size of the population for fisher's test. Default is 20000
+        source : # (database|file) Where to take annotations from.
+        output : # filename to write results to
+        file_name : # Required if using a file
 
 clustering : # How to cluster the expanded network (OPTIONAL)
     method : # (infomap|louvain)
     weight : # If True, the clustering will assign edge weights based on the number of publications validating each interaction.
     file   : # Output file name (optional)
-
+    # Enrichment analysis on the clusters (OPTIONAL)
+    enrichment :
+        method : # (monte|fisher) Default is Fisher
+        sims   : # Only necessary if using monte carlo method. Default is 1000
+        max_p  : # The maximum p-value for significance. Default is 0.05
+        source : # (database|file) Where to take annotations from.
+        output : # filename to write results to
+        file_name : # Required if using a file

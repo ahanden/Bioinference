@@ -3,6 +3,37 @@
 from fisher import pvalue
 import genes
 
+def readDB(conn):
+    """Reads annotations in from the genes database.
+
+    Parameters
+    ----------
+    conn : A MySQLdb connection to the genes database.
+
+    Returns
+    -------
+    paths : A dictionary of annotations/pathways to sets of genes
+
+    Notes
+    -----
+    This method puts all annotations into the same key list - not separating
+    by database/source. I may want to change this in the future.
+    """
+
+    paths = {}
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT db, annotation, entrez_id FROM annotations")
+    for row in cursor.fetchall():
+        db, ann, eid = row
+        label = "%s: %s" % (db, ann)
+        if label not in paths:
+            paths[label]  = set()
+        paths[label].add(eid)
+
+    return paths
+
+
 def readBIFile(fname, conn=None):
     """Reads a pathway file as retrieved from the Broad Institute
     (http://software.broadinstitute.org/gsea/msigdb/collections.jsp)

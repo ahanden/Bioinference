@@ -65,14 +65,12 @@ def mapIDs(G, conn, in_type="Entrez", out_type="Entrez"):
                 H.add_edge(id1, id2, data)
     return H
 
-def readDB(conn, min_pubs=0):
+def readDB(conn):
     """Reads interactions into a NetworkX graph from a MySQL database
 
     Parameters
     ----------
     conn : A MySQLdb connection
-
-    min_pubs : Minimum publications an edge must have in order to be included in the interactome (default=0)
 
     Returns
     -------
@@ -81,14 +79,9 @@ def readDB(conn, min_pubs=0):
 
     G = nx.Graph()
     cursor = conn.cursor()
-    if min_pubs == 0:
-        cursor.execute("SELECT entrez_id1, entrez_id2, count(pubmed_id) FROM interactions LEFT JOIN publications ON interactions.int_id = publications.int_id GROUP BY interactions.int_id")
-    else:
-        cursor.execute("SELECT MAX(counted) FROM (SELECT COUNT(pubmed_id) AS counted FROM publications GROUP BY int_id) AS x")
-        max_pubs = cursor.fetchone()[0]
-        cursor.execute("SELECT entrez_id1, entrez_id2, count(pubmed_id) FROM interactions LEFT JOIN publications ON interactions.int_id = publications.int_id GROUP BY interactions.int_id HAVING count(pubmed_id) >= %s", [min_pubs])
+    cursor.execute("SELECT entrez_id1, entrez_id2 FROM interactions")
     for row in cursor.fetchall():
-        G.add_edge(int(row[0]),int(row[1]),publications=int(row[2]))
+        G.add_edge(int(row[0]),int(row[1]))
 
 
     return G

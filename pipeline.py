@@ -7,9 +7,12 @@ import MySQLdb
 import networkx as nx
 import signal
 import sys
+import os
 import yaml
 
-from bioinference import graphIO, genes, expand, cluster
+from bioinference import graphIO, genes, expand, cluster, pathways
+
+sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
 
 # Ctrl-C Interupt catching
 def sigint_handler(signal, frame):
@@ -95,8 +98,6 @@ def run(arg):
         die("You must give an interactome format (database, GML, TSV, or SIF).")
 
     if format == 'database':
-        min_pubs = args['interactome'].get('min_pubs', 0)
-
         try:
             conn = MySQLdb.connect(
                 host='localhost',
@@ -104,7 +105,7 @@ def run(arg):
                 user=args['interactome']['ints_db']['user'],
                 passwd=args['interactome']['ints_db']['password'])
             print "Used %s database for interactions." % (args['interactome']['ints_db']['name'])
-            CI = graphIO.readDB(conn, min_pubs=min_pubs)
+            CI = graphIO.readDB(conn)
         except KeyError:
             die("You must give a database name, user, and password for the interactions database.")
 
@@ -119,7 +120,7 @@ def run(arg):
             die("%s is an unknown file format for reading the interactome - must be database, GML, SIF, or TSV." % (format))
 
     CI = max(nx.connected_component_subgraphs(CI), key=len)
-    print "Interactome stats: %d nodes and %d edges using a publication threshold of %d" % (len(CI), len(CI.edges()), min_pubs)
+    print "Interactome stats: %d nodes and %d edges" % (len(CI), len(CI.edges()))
     print
 
     # Conditionally write the interactome
@@ -244,6 +245,62 @@ def run(arg):
                 for edge in G.edges(data=True):
                     file.write("%d (INTERACTS) %d\t%f\n" % (edge[0], edge[1], edge[2]['pval']))
 
+    # Perform network enrichment analysis
+    if 'enrichment' in args['expansion']:
+        method = args['expansion']['enrichment'].get('method', 'fisher')
+        sims   = args['expansion']['enrichment'].get('sims', 1000)
+        pop    = args['expansion']['enrichment'].get('pop', 20000)
+        source = args['expansion']['enrichment'].get('source')
+        output = args['expansion']['enrichment'].get('output')
+
+        paths = {}
+        if source == 'database':
+            print "Performed enrichment using the given genes database"
+            try:
+                paths = pathways.readDB(genes_conn)
+            except:
+                die("Unable to connect to the MySQL database for enrichment.")
+
+        elif source == 'file':
+            fname = args['expansion']['enrichment'].get('file_name')
+            print "Performed enrichment from file %s" % fname
+
+            if file_name is None:
+                die("You must provide a file name for enrichment analysis.")
+            try:
+                paths = pathways.readBIFile(fname, conn=genes_conn)
+            except:
+                die("Unable to parse pathway file for enrichment")
+        else:
+            die("Unrecognized source for enrichment %s. You must choose either database or file." % source)
+
+        print "%d total annotations loaded" % len(paths.keys())
+
+        results = {}
+        if method == 'fisher':
+            results = pathways.fisherEnrichment(G, paths, pop)
+        elif method == 'monte':
+            def sampler(n,G):
+                l = G.nodes()
+                shuffle(l)
+                return l[:n]
+            results = pathways.monteCarloEnrichment(G, paths, sims, sampler, len(G), CI)
+        else:
+            die("Unrecognized enrichment method %s. You must choose either fisher or monte." % method)
+
+        try:
+            count = 0
+            with open(output,'w') as file:
+                file.write("Annotation\tP-value\tCorrect P-value\tGenes\n")
+                for path, vals in results.iteritems():
+                    if vals['corr_pval'] < 0.05:
+                        file.write("%s\t%f\t%f\t%s\n" % (path, vals['pval'], vals['corr_pval'], ', '.join([str(g) for g in vals['genes']])))
+                        count += 1
+            print "Enrichment of network found %d significant annotations" % count
+            print
+        except:
+            die("Unable to write enrichment results to file")
+
     ################ CLUSTERING #################
     if 'clustering' in args:
         cd = {} # Cluster dictionary
@@ -274,6 +331,7 @@ def run(arg):
             len(cd),
             max([len(cd[x]) for x in cd]),
             sum([len(cd[x]) for x in cd]) / float(len(cd)))
+        print
 
         # Write clusters
         if cluster_file is not None:
@@ -281,6 +339,63 @@ def run(arg):
                 file.write("Node\tCluster\n")
                 for node in G.nodes(data=True):
                     file.write("%d\t%d\n" % (node[0],node[1]['cluster']))
+
+        # Perform cluster enrichment analysis
+        if 'enrichment' in args['clustering']:
+            method = args['clustering']['enrichment'].get('method', 'fisher')
+            sims   = args['clustering']['enrichment'].get('sims', 1000)
+            pop    = args['clustering']['enrichment'].get('pop', 20000)
+            source = args['clustering']['enrichment'].get('source')
+            output = args['clustering']['enrichment'].get('output')
+
+            paths = {}
+            if source == 'database':
+                print "Performed enrichment using the given genes database"
+                try:
+                    paths = pathways.readDB(genes_conn)
+                except:
+                    die("Unable to connect to the MySQL database for enrichment.")
+
+            elif source == 'file':
+                fname = args['clustering']['enrichment'].get('file_name')
+                print "Performed enrichment from file %s" % fname
+
+                if file_name is None:
+                    die("You must provide a file name for enrichment analysis.")
+                try:
+                    paths = pathways.readBIFile(fname, conn=genes_conn)
+                except:
+                    die("Unable to parse pathway file for enrichment")
+            else:
+                die("Unrecognized source for enrichment %s. You must choose either database or file." % source)
+
+            print "%d total annotations loaded" % len(paths.keys())
+
+            results = {}
+            for c in cd:
+                if method == 'fisher':
+                    results[c] = pathways.fisherEnrichment(cd[c], paths, pop)
+                elif method == 'monte':
+                    def sampler(n,G):
+                        l = G.nodes()
+                        shuffle(l)
+                        return l[:n]
+                    results[c] = pathways.monteCarloEnrichment(cd[c], paths, sims, sampler, len(G), CI)
+                else:
+                    die("Unrecognized enrichment method %s. You must choose either fisher or monte." % method)
+
+            try:
+                count = 0
+                with open(output,'w') as file:
+                    file.write("Cluster\tAnnotation\tP-value\tCorrect P-value\tGenes\n")
+                    for c in results:
+                        for path, vals in results[c].iteritems():
+                            if vals['corr_pval'] < 0.05:
+                                file.write("%s\t%s\t%f\t%f\t%s\n" % (c, path, vals['pval'], vals['corr_pval'], ', '.join([str(g) for g in vals['genes']])))
+                                count += 1
+                print "Enrichment of clusters found %d significant annotations" % count
+            except:
+                die("Unable to write enrichment results to file")
 
 if __name__ == "__main__":
     run(sys.argv[1])

@@ -76,10 +76,10 @@ def checkEID(eid, conn=None):
     valid_eids = set()
     cursor.execute("SELECT EXISTS(SELECT * FROM genes WHERE entrez_id = %(eid)s)", {'eid': eid})
     if cursor.fetchone()[0] == 1:
-        valid_eids.add(eid)
+        valid_eids.add(int(eid))
     else:
-        cursor.execute("SELECT entrez_id FROM discontinued_genes WHERe discontinued_id = %(eid)s", {'eid': eid})
-        valid_eids.update([row[0] for row in cursor.fetchall()])
+        cursor.execute("SELECT entrez_id FROM discontinued_genes WHERE discontinued_id = %(eid)s", {'eid': eid})
+        valid_eids.update([int(row[0]) for row in cursor.fetchall()])
    
     return valid_eids
 
@@ -106,17 +106,17 @@ def getEID(symbol, conn=None):
     # Start with a direct query
     args = {"symbol": symbol}
     cursor.execute("SELECT entrez_id FROM genes WHERE symbol = %(symbol)s", args)
-    eids = [row[0] for row in cursor.fetchall()]
+    eids = [int(row[0]) for row in cursor.fetchall()]
 
     # If that didn't work, search for a discontinued symbol
     if not eids:
         cursor.execute("SELECT entrez_id FROM discontinued_genes WHERE discontinued_symbol = %(symbol)s", args)
-        eids = [row[0] for row in cursor.fetchall()]
+        eids = [int(row[0]) for row in cursor.fetchall()]
 
         # if THAT didn't work, search for synonyms
         if not eids:
             cursor.execute("SELECT entrez_id FROM gene_synonyms WHERE symbol = %(symbol)s", args)
-            eids = [row[0] for row in cursor.fetchall()]
+            eids = [int(row[0]) for row in cursor.fetchall()]
 
     # Return whatever we found (if anything)
     return set(eids)
@@ -141,7 +141,7 @@ def getSymbol(eid, conn=None):
         conn = gene_conn
     cursor = conn.cursor()
 
-    valid_eids = checkEID(cursor, eid)
+    valid_eids = checkEID(eid, conn)
     symbols = set()
     for gene in valid_eids:
         cursor.execute("SELECT symbol FROM genes WHERE entrez_id = %(eid)s AND symbol IS NOT NULL", {'eid': gene})
