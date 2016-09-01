@@ -274,6 +274,8 @@ def monteCarloPrune(goi, CI, method, iters=1000, max_p=0.05, *args):
     G : an expanded, pruned NetworkX Graph
     """
  
+    goi = set(goi)
+
     # Create the spGraph for the GOIs
     G = method(goi,CI,*args)
     for edge in G.edges(data=True):
@@ -307,13 +309,15 @@ def monteCarloPrune(goi, CI, method, iters=1000, max_p=0.05, *args):
             break
 
         # Check to see if pruning this edge makes a GOI orphan
-        if edge[0] in goi and len(G[edge[0]]) == 1:
-            break
-        if edge[1] in goi and len(G[edge[1]]) == 1:
+        T = G.copy()
+        T.remove_edge(*edge[:2])
+        T = next(nx.connected_component_subgraphs(T))
+
+        if len(set(T) & goi) < len(goi):
             break
 
         # Otherwise, remove the insignificant edge
-        G.remove_edge(*edge[:2])
+        G = T
 
     # Calculate p-values
     edges = G.edges(data=True)

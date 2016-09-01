@@ -84,6 +84,7 @@ def run(arg):
             db=args['genes_db']['name'],
             user=args['genes_db']['user'],
             passwd=args['genes_db']['password'])
+        genes.connect(genes_conn)
         print "Used %s database for genes." % (args['genes_db']['name'])
     except KeyError:
         die("You must give a database name, user, and password for the genes database.")
@@ -115,7 +116,12 @@ def run(arg):
             die("You must provide an input file if you are not reading the CI from a database.")
 
         try:
-            CI = readers[format](file)
+            I = readers[format](file)
+            for edge in I.edges():
+                for eid1 in genes.checkEID(edge[0]):
+                    for eid2 in genes.checkEID(edge[1]):
+                        CI.add_edge(eid1, eid2)
+                    
         except KeyError:
             die("%s is an unknown file format for reading the interactome - must be database, GML, SIF, or TSV." % (format))
 

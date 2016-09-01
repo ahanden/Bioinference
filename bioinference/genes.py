@@ -1,6 +1,7 @@
 #!/bin/python
 
 import MySQLdb
+from MySQLdb import connections
 
 """
 These methods are meant for the querying of the genes database.
@@ -31,7 +32,7 @@ def connect(*args):
     global gene_conn
 
     if len(args) == 1:
-        if type(args[0]) is MySQLdb.conn:
+        if type(args[0]) is connections.Connection:
             gene_conn = args[0]
         else:
             raise TypeError("connect() takes a MySQLdb.conn object as its first argument")
