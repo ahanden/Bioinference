@@ -300,7 +300,8 @@ def run(arg):
                 file.write("Annotation\tP-value\tCorrect P-value\tGenes\n")
                 for path, vals in results.iteritems():
                     if vals['corr_pval'] < 0.05:
-                        file.write("%s\t%f\t%f\t%s\n" % (path, vals['pval'], vals['corr_pval'], ', '.join([str(g) for g in vals['genes']])))
+                        symbols = [genes.getSymbol(eid).pop() for eid in vals['genes']]
+                        file.write("%s\t%f\t%f\t%s\n" % (path, vals['pval'], vals['corr_pval'], ', '.join(symbols)))
                         count += 1
             print "Enrichment of network found %d significant annotations" % count
             print
@@ -344,7 +345,8 @@ def run(arg):
             with open(cluster_file,'w') as file:
                 file.write("Node\tCluster\n")
                 for node in G.nodes(data=True):
-                    file.write("%d\t%d\n" % (node[0],node[1]['cluster']))
+                    #file.write("%d\t%d\n" % (node[0],node[1]['cluster']))
+                    file.write("%s\t%d\n" % (genes.getSymbol(node[0]),node[1]['cluster']))
 
         # Perform cluster enrichment analysis
         if 'enrichment' in args['clustering']:
@@ -397,7 +399,8 @@ def run(arg):
                     for c in results:
                         for path, vals in results[c].iteritems():
                             if vals['corr_pval'] < 0.05:
-                                file.write("%s\t%s\t%f\t%f\t%s\n" % (c, path, vals['pval'], vals['corr_pval'], ', '.join([str(g) for g in vals['genes']])))
+                                symbols = [genes.getSymbol(eid).pop() for eid in vals['genes']]
+                                file.write("%s\t%s\t%f\t%f\t%s\n" % (c, path, vals['pval'], vals['corr_pval'], ', '.join(symbols)))
                                 count += 1
                 print "Enrichment of clusters found %d significant annotations" % count
             except:
