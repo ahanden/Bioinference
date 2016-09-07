@@ -313,7 +313,7 @@ def monteCarloPrune(goi, CI, method, iters=1000, max_p=0.05, *args):
         T.remove_edge(*edge[:2])
         T = next(nx.connected_component_subgraphs(T))
 
-        if len(set(T) & goi) < len(goi):
+        if len(set(T) & goi) < len(set(G) & goi):
             break
 
         # Otherwise, remove the insignificant edge
