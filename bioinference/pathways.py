@@ -139,7 +139,8 @@ def fisherEnrichment(eids, paths, N=20000):
               { pathway : {
                   pval,
                   corr_pval,
-                  genes
+                  genes,
+                  size
               }
     """
     sample = set(eids)
@@ -154,7 +155,10 @@ def fisherEnrichment(eids, paths, N=20000):
         
         p = pvalue(tp, fp, fn, tn).right_tail
 
-        results[path] = {'pval': p, 'genes': sample & pop}
+        results[path] = {
+            'pval'  : p, 
+            'genes' : sample & pop,
+            'size'  : len(pop)}
        
     fdrcorrection(results)
 
