@@ -9,8 +9,9 @@ import signal
 import sys
 import os
 import yaml
+import subprocess
 
-from bioinference import graphIO, genes, expand, cluster, pathways
+from bioinference import graphIO, genes, expand, cluster, pathways, miRNA
 
 sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
 
@@ -72,8 +73,10 @@ def run(arg):
     else:
         with open(arg,'r') as file:
             args = yaml.load(file)
-    print "----------------------------------------------"
-    print "Analysis performed on %s" % (strftime("%c"))
+
+    header_str = "Analysis performed on %s, Bioinference version %s" % (strftime("%c"), subprocess.check_output(["git", "describe"]))
+    print "-" * len(header_str)
+    print header_str
     print
 
     ############# CONNECT TO GENES DB ################
@@ -148,21 +151,83 @@ def run(arg):
     
     ############## GENES OF INTEREST ################
     gois = set()
-    if 'gois' not in args:
-        die("You must provide genes of interest as seeds.")
-    if 'file' not in args['gois']:
+    if 'input' not in args:
+        die("You must provide either genes of interest or miRNAs as seeds.")
+
+    input_type = args['input'].get('type', None)
+    fname = args['input'].get('file', None)
+
+    if input_type not in ['gois', 'mirs']:
+        die("The input type must be either gois or mirs.")
+    if fname is None:
         die("You must provide a file name containing genes of interest.")
+
     try:
-        with open(args['gois']['file'],'r') as file:
-            for line in file:
-                symbol = line.strip()
-                eids = genes.getEID(symbol, genes_conn)
-                if eids:
-                    gois.update(eids)
-                else:
-                    print "Warning: Unable to find an Entrez ID for gene symbol %s" % (symbol)
+        if input_type == 'gois':
+            with open(fname, 'r') as file:
+                for line in file:
+                    symbol = line.strip()
+                    eids = genes.getEID(symbol, genes_conn)
+                    if eids:
+                        gois.update(eids)
+                    else:
+                        print "Warning: Unable to find an Entrez ID for gene symbol %s" % (symbol)
+        elif input_type == 'mirs':
+            ts_file  = args['input'].get('targetscan_file', None)
+            mtb_file = args['input'].get('mirtarbase_file', None)
+            out_file = args['input'].get('gene_to_mir_file', None)
+            species  = args['input'].get('species', None)
+
+            if ts_file is None and mtb_file is None:
+                die("You must provide at least one miR database if using miRs as input.")
+
+            targets = {}
+            if ts_file:
+                targets = miRNA.loadTargetScan(genes_conn, ts_file, species)
+                print "Loaded TargetScan: %d miRNAs read" % (len(targets))
+            if mtb_file:
+                mirbase_targets = miRNA.loadMirTarBase(genes_conn, mtb_file, species)
+                print "Loaded miRTarBase: %d miRNAs read" % (len(mirbase_targets))
+                for mir, gene_set in mirbase_targets.iteritems():
+                    if mir not in targets:
+                        targets[mir] = set()
+                    targets[mir].update(gene_set)
+
+            gois = set()
+            mirs = set()
+            with open(fname, 'r') as file:
+                for line in file:
+                    mir = line.strip()
+                    mirs.add(mir)
+                    if mir in targets:
+                        gois.update(targets[mir])
+                    else:
+                        print "Warning: Unable to find any targets of %s" % mir
+            print "Read in %d miRNAs targetting %d genes" % (len(mirs), len(gois))
+
+            try:
+                if out_file:
+                    inverse_targets = {}
+                    for mir, gene_set in targets.iteritems():
+                        if mir in mirs:
+                            for gene in gene_set:
+                                if gene in gois:
+                                    if gene not in inverse_targets:
+                                        inverse_targets[gene] = set()
+                                    inverse_targets[gene].add(mir)
+
+                    with open(out_file, 'w') as file:
+                        file.write("Gene\ttargetting miRs\n")
+                        for gene in gois:
+                            symbol = gene
+                            symbols = genes.getSymbol(gene)
+                            if symbols:
+                                symbol = symbols.pop()
+                            file.write("%s\t%s\n" % (symbol, ", ".join(inverse_targets[gene])))
+            except IOError as e:
+                die("%s\nUnable to write gene_to_mir_file." % (e))
     except IOError as e:
-        die("%s\nUnable to read GOI file." % (e))
+        die("%s\nUnable to read input file." % (e))
 
     seeds = gois & set(CI)
     print "%d unique genes of interest (GOIs) read from file. %d of these have interactions." % (len(gois), len(seeds))
@@ -172,12 +237,12 @@ def run(arg):
         sys.exit(0)
 
     # Output genes of interest
-    label_file  = args['gois'].get('label_file', None)
-    orphan_file = args['gois'].get('true_orphan_file', None)
+    label_file  = args['input'].get('label_file', None)
+    orphan_file = args['input'].get('true_orphan_file', None)
     if label_file is not None:
         with open(label_file,'w') as file:
             file.write("Gene\tisGOI\n")
-            for gene in gois:
+            for gene in gois & set(CI):
                 file.write("%d\t1\n" % (gene))
     if orphan_file is not None:
         with open(orphan_file,'w') as file:
@@ -191,6 +256,24 @@ def run(arg):
     if 'expansion' not in args:
         die("You must provide details on the expansion method to use.")
     G = nx.Graph()
+    if 'LCC' in args['expansion']:
+        fname  = args['expansion']['LCC'].get("file")
+        format = args['expansion']['LCC'].get("format")
+        if fname is None:
+            die("You must provide a filename if you want to store the LCC.")
+        if format is None:
+            die("You must provide a valid file format for writing the LCC (GML, SIF, or TSV)")
+
+        G = CI.subgraph(seeds)
+        print "LCC contains %d/%d seed genes with %d interactions (%d average interactions per gene).\n" % (
+            len(G),
+            len(seeds),
+            len(G.edges()),
+            sum(len(G[node]) for node in G)/len(G)
+        )
+
+        writers[format](G, fname)
+
     method = args['expansion'].get('method', None)
     if method is None:
         die("You must define an expansion method - must be sp or pval.")
@@ -216,7 +299,7 @@ def run(arg):
         print "Expanded network using p-value method"
         print "Expansion parameters: max_p=%f, max_size=%d, verbose=%s" % (max_p, max_size, verbose)
 
-        G = expand.cottrillGraph(gois,CI,max_p=0.05,max_size=None, verbose=verbose)
+        G = expand.cottrillGraph(gois, CI, max_p=0.05, max_size=None, verbose=verbose)
 
     else:
         die("%s is an unrecognized expansion method - must be either pval or sp." % (method))
@@ -346,7 +429,7 @@ def run(arg):
                 file.write("Node\tCluster\n")
                 for node in G.nodes(data=True):
                     #file.write("%d\t%d\n" % (node[0],node[1]['cluster']))
-                    file.write("%s\t%d\n" % (genes.getSymbol(node[0]),node[1]['cluster']))
+                    file.write("%s\t%d\n" % (genes.getSymbol(node[0]).pop(),node[1]['cluster']))
 
         # Perform cluster enrichment analysis
         if 'enrichment' in args['clustering']:

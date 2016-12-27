@@ -18,12 +18,23 @@ interactome : # The interactome (REQUIRED)
         user     : # MySQL user name
         password : # MySQL password
 
-gois : # Genes of interest (REQUIRED)
-    file             : # A file to read from
+input : # What to build the network off of (REQUIRED)
+    type             : # Whether to make the network using a list of genes or the targets of a list of miRs (gois|mirs) (REQUIRED)
+    file             : # A file containing the list of genes/miRs
     label_file       : # A file name to write a Cytoscape feature file to for labeling (Optional)
     true_orphan_file : # A file to write the IDs of any gene that has zero interactions in the given interactome (Optional)
+    # mirs type only arguments:
+    gene_to_mir_file : # A file to write the targetting miRs of each seed gene to. Only used if type is mirs (Optional)
+    species          : # A list of species names to check miRNAs for. Decreases runtime if given. (Optional)
+    # At least one of the following two fields must be filled out if using miRs as seeds.
+    targetscan_file  : # The location of the TargetScan database file. Required only if using miRs, and is optional if using miRTarBase/
+    mirtarbase_file  : # The location of the miRTarBase database file. Required only if using miRs, and is optional if using Target Scan.
 
+ 
 expansion : # How we created an expanded network from the GOIs (REQUIRED)
+    LCC : # Parameters for writing the LCC of the seed genes to a file (optional)
+        file   : # A file to write the LCC to
+        format : # (GML|TSV|SIF)
     output : # Writing the expanded network to file (optional)
         format     : # (GML|TSV|SIF)
         graph_file : # Output file name
