@@ -23,7 +23,7 @@ def readDB(conn):
     paths = {}
 
     cursor = conn.cursor()
-    cursor.execute("SELECT db, annotation, entrez_id FROM annotations")
+    cursor.execute("SELECT db, annotation, entrez_id FROM annotations WHERE db != 'ClinVar'")
     for row in cursor.fetchall():
         db, ann, eid = row
         label = "%s: %s" % (db, ann)
