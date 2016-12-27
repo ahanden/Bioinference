@@ -3,61 +3,129 @@ from fisher import pvalue
 from math import log
 import re
 import sys
+import genes
 
-def readTargetScanFile(conn, filename, species_code=9606):
-    """Reads data from a Target Scan output file into memory.
+
+def loadTargetScan(conn, fname, species_names=None):
+    """Reads the Target Scan database into memory as a dictionary.
 
     Parameters
     ----------
-    conn : a MySQL connection to the genes database
+    conn : a MySQLdb connection to the genes database
 
-    filename : A file location
-    
-    species_code : Which species to filter for (default=9606).
-        Will not filter for species if the value is None.
+    fname : The path to the TargetScan database dump
+
+    species_names: A list of the proper names of species to extract miRNAs
+                  for. If given, this method will only return miRs for the given 
+                  species. (Optional)
 
     Returns
     -------
-    TS : A dictionary of lists
-        The dictionary keys are miRNAs, and values are lists of targets as Entrez IDs
-    """
-    
-    TS = {}
-    cursor = conn.cursor()
-    p = re.compile('(ENSG\d+)\.?')
+    targets: A dictionary with miRs as keys and sets of genes as values.
 
-    with open(filename) as file:
-        next(file) # Skip the header
+
+    Note
+    ----
+    This method is currently only set up for human and mouse
+    """
+
+    targets = {}
+
+    prefix_map = {
+        9606:  "hsa",
+        10090: "mmu",
+        10116: "rno",
+        13616: "mdo",
+        8364:  "xtr",
+        9031:  "gga",
+        9544:  "mml",
+        9598:  "ptr",
+        9615:  "cfa",
+        9913:  "bta"
+    }
+
+    species_map = {
+        9606: 'Homo sapiens',
+        10090: 'Mus musculus',
+        10116: 'Rattus norvegicus',
+        13616: 'Monodelphis domestica',
+        8364: 'Xenopus tropicalis',
+        9031: 'Gallus gallus',
+        9544: 'Macaca mulatta',
+        9598: 'Pan troglodytes',
+        9615: 'Canis familiaris',
+        9913: 'Bos tarus'
+    }
+
+    if species_names:
+        species_names = set(species_names)
+
+    with open(fname, 'r') as file:
+        next(file)
+
         for line in file:
             fields = line.strip().split("\t")
 
-            mirna         = fields[0]
-            target_id     = fields[1]
+            mirs          = fields[0][4:].split("/")
             target_symbol = fields[2]
-            transcript    = fields[3]
-            species       = int(fields[4])
-           
-            # Skip along if this doesn't meet our filters
-            if species_code is not None and species != species_code:
-                continue
+            species_code  = int(fields[4])
 
-            eids = getEID(cursor, target_symbol)
-            if not eids:
-                m = p.match(target_id)
-                eids = crossQuery(cursor, 'Ensembl', m.group(1)) 
+            if species_names and species_map[species_code] in species_names:
 
-            if eids:
-                if mirna not in TS:
-                    TS[mirna] = {}
-                TS[mirna].update({eid: True for eid in eids})
-    
-    # Clean up formatting
-    for mirna in TS:
-        TS[mirna] = TS[mirna].keys()
-    
-    return TS
-    
-    
+                for mir in mirs:
+
+                    mir = prefix_map[species_code]+"-miR-"+mir
+                    if '.' in mir:
+                        mir = mir[:mir.index('.')]
+
+                    if mir not in targets:
+                        targets[mir] = set()
+                        
+                    targets[mir].update(genes.getEID(fields[2], conn))
+
+    return targets
+
+
+def loadMirTarBase(conn, fname, species_names=None):
+    """Reads the miRTarBase database into memory as a dictionary.
+
+    Parameters
+    ----------
+    conn : a MySQLdb connection to the genes database
+
+    fname : The path to the TargetScan database dump
+
+    species_names: A list of the proper names of species to extract miRNAs
+                  for. If given, this method will only return miRs for the given 
+                  species. (Optional)
+
+    Returns
+    -------
+    targets: A dictionary with miRs as keys and sets of genes as values.
+    """
+
+    targets = {}
+
+    if species_names:
+        species_names = set(species_names)
+
+    with open('miRTarBase_MTI.csv', 'r') as file:
+        for line in file:
+            fields = line.strip().split(",")
+
+            mir     = fields[1]
+            species = fields[2]
+            target  = fields[4]
+
+            if species_names and species in species_names:
+
+                if mir not in targets:
+                    targets[mir] = set()
+
+                targets[mir].update(genes.checkEID(target, conn))
+
+    return targets
+
 def spanningScores(TS, NET, CI, clusters):
     """Computes spanning scores for all miRNA.
 
