@@ -2,6 +2,7 @@ from fisher import pvalue
 from random import shuffle
 import networkx as nx
 import sys
+from itertools import chain
 
 def prunedGraph(GO, CI, pmax=0.05, G=None):
     """Creates am expanded graph of nodes that are significantly connected to genes of
@@ -120,21 +121,23 @@ def cottrillGraph(goi, CI, max_p=0.05, max_size=None, verbose=False):
         max_size = len(goi) * 2
 
     goi_set = set(goi)
-    new_genes = set(goi)
+    new_genes = goi_set & set(CI)
     
     G = CI.subgraph(new_genes)
-    comps = list(nx.connected_components(G))
 
     # Extend while the network is of a reasonable size
     # (Only examines the largest connected component)
     while len(max(nx.connected_components(G), key=len)) < max_size:
 
         # Consider adding any interacting partner of the current extended network
-        neighbors = set(getPartners(new_genes,CI,2)) - new_genes
+        neighbors = set(chain(*list(CI[g].keys() for g in new_genes))) - new_genes
+
         # Keep track of the genes with the greatest significance
-        best_genes = {'nodes': [],'pval': 2}
+        best_genes = {'nodes': [],'pval': 1}
+
         # Our population size is two interactions deep from the current genes
-        N = len(getPartners(new_genes,CI,3))
+        #N = len(getPartners(new_genes,CI,3))
+        N = len(neighbors | new_genes | set(chain(*list(CI[g].keys() for g in neighbors))))
 
         for neighbor in neighbors:
             # Any included gene must interact with 1 GOI
@@ -166,7 +169,7 @@ def cottrillGraph(goi, CI, max_p=0.05, max_size=None, verbose=False):
         if verbose:
             ccs = list(nx.connected_components(G))
             LCC = max(ccs, key=len)
-            sys.stdout.write("Number of Components: %d\tLCC size: %d\t%d/%d seeds included\r" % (len(ccs),len(LCC),len(set(LCC)& goi_set),len(goi)))
+            sys.stdout.write("Number of Components: %d, LCC size: %d, %d/%d seeds included     \r" % (len(ccs),len(LCC),len(set(LCC)& goi_set),len(goi)))
             sys.stdout.flush()
        
 
