@@ -3,7 +3,7 @@
 from fisher import pvalue
 from Genes import GeneDB
 
-def read_bi_file(file_name, gene_db conn=None):
+def read_bi_file(file_name, gene_db, conn=None):
     """Reads a pathway file as retrieved from the Broad Institute
     (http://software.broadinstitute.org/gsea/msigdb/collections.jsp)
 

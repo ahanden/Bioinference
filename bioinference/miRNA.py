@@ -1,24 +1,33 @@
-import MySQLdb
+#!/usr/bin/python
+
 from fisher import pvalue
 from math import log
-import re
-import sys
-import genes
+from Genes import GeneDB
 
-
-def loadTargetScan(conn, fname, species_names=None):
+def read_ts(file_name, gene_db, species_names=None):
     """Reads the Target Scan database into memory as a dictionary.
 
     Parameters
     ----------
-    conn : a MySQLdb connection to the genes database
+    fle_name : The path to the TargetScan database dump
 
-    fname : The path to the TargetScan database dump
+    gene_db : A GeneDB object to generate Genes from
 
     species_names: A list of the proper names of species to extract miRNAs
                   for. If given, this method will only return miRs for the given 
                   species. (Optional)
 
+                  The following species names are supported:
+                    Homo sapiens
+                    Mus musculus
+                    Rattus norvegicus
+                    Monodelphis domestica
+                    Xenopus tropicalis
+                    Gallus gallus
+                    Macaca mulatta
+                    Pan troglodytes
+                    Canis familiaris
+                    Bos tarus
     Returns
     -------
     targets: A dictionary with miRs as keys and sets of genes as values.
@@ -60,7 +69,8 @@ def loadTargetScan(conn, fname, species_names=None):
     if species_names:
         species_names = set(species_names)
 
-    with open(fname, 'r') as file:
+    with open(file_name, 'r') as file:
+        # Skip the header
         next(file)
 
         for line in file:
@@ -70,7 +80,7 @@ def loadTargetScan(conn, fname, species_names=None):
             target_symbol = fields[2]
             species_code  = int(fields[4])
 
-            if species_names and species_map[species_code] in species_names:
+            if not species_names or species_map[species_code] in species_names:
 
                 for mir in mirs:
 
@@ -81,19 +91,19 @@ def loadTargetScan(conn, fname, species_names=None):
                     if mir not in targets:
                         targets[mir] = set()
                         
-                    targets[mir].update(genes.getEID(fields[2], conn))
+                    targets[mir].add(gene_db.get_gene(fields[2], "symbol"))
 
     return targets
 
 
-def loadMirTarBase(conn, fname, species_names=None):
+def read_mtb(file_name, gene_db, species_names=None):
     """Reads the miRTarBase database into memory as a dictionary.
 
     Parameters
     ----------
-    conn : a MySQLdb connection to the genes database
+    file_name : The path to the miRTarBase database dump
 
-    fname : The path to the miRTarBase database dump
+    gene_db : A GeneDB object to generate Genes from
 
     species_names: A list of the proper names of species to extract miRNAs
                   for. If given, this method will only return miRs for the given 
@@ -101,7 +111,7 @@ def loadMirTarBase(conn, fname, species_names=None):
 
     Returns
     -------
-    targets: A dictionary with miRs as keys and sets of genes as values.
+    A dictionary with miRs as keys and sets of genes as values.
     """
 
     targets = {}
@@ -109,7 +119,7 @@ def loadMirTarBase(conn, fname, species_names=None):
     if species_names:
         species_names = set(species_names)
 
-    with open(fname, 'r') as file:
+    with open(file_name, 'r') as file:
         for line in file:
             fields = line.strip().split(",")
 
@@ -117,58 +127,62 @@ def loadMirTarBase(conn, fname, species_names=None):
             species = fields[2]
             target  = fields[4]
 
-            if species_names and species in species_names:
+            if not species_names or species in species_names:
 
                 if mir not in targets:
                     targets[mir] = set()
 
-                targets[mir].update(genes.checkEID(target, conn))
+                targets[mir].update(gene_db.get_gene(target))
 
     return targets
 
-def spanningScores(TS, NET, CI, clusters):
+def spanning_scores(mirs, graph, interactome, clusters):
     """Computes spanning scores for all miRNA.
 
     Parameters
     ----------
-    TS : the TargetScan dictionary
+    mirs : A dictionary of miRs to their Gene targets
 
-    NET : the network to compute scores over
+    graph : The graph over which to compute the spanning scores
 
-    CI : the consolidated interactome
+    interactome; The consolidate interactome
 
-    clusters : a list of clusters for NET
+    clusters : A dictionary of clusters for the graph
 
     Returns
     -------
+    A dictionary of miRs to their corresponding spanning scores
     """
 
     stats = {}
-    N = len(CI)  # population size
-    M = len(NET) # sample size
+    N = len(interactome)  # population size
+    M = len(graph) # sample size
+
+    clusters = [set(genes) for genes in clusters.values()]
 
     data = {}
-    for miR, targets in TS.iteritems():
-        targpool = set(targets) & set(CI) # get target pool
+    for mir, targets in mirs.iteritems():
+        targets = set(targets)
 
-        n = len(targpool)                # successes in population
-        x = len(targpool & set(NET))    # successes in sample
+        pool = targets & set(interactome) # get target pool
+        n    = len(pool)                  # successes in population
+        x    = len(pool & set(graph))     # successes in sample
 
-        pval = fishers(N,n,M,x)
-        negp = -log(pval)
+        p_val = fishers(N,n,M,x)
+        neg_p = -log(p_val)
         
-        clust_count = sum([1 for cluster in clusters if len(cluster) >3 and set(targets) & set(cluster)])
+        clust_count = sum([1 for clu in clusters if len(clu) > 3 and set(targets) & clu])
 
         data[miR] = {
             'hits'        : x,
-            'negp'        : negp,
+            'neg_p'       : neg_p,
             'clust_count' : clust_count,
-            'pval'        : pval
+            'p_val'       : pval
         }
 
     max_o = float(max([0] + [data[miR]['hits']        for miR in data])) # best achieved overlap
     max_c = float(max([0] + [data[miR]['clust_count'] for miR in data])) # best achieved cluster count
-    max_p = float(max([0] + [data[miR]['negp']        for miR in data])) # best achieved -log(pval)
+    max_p = float(max([0] + [data[miR]['neg_p']       for miR in data])) # best achieved -log(pval)
 
     if max_o == 0:
         raise Exception("There are no miRNA targets in the network")
@@ -178,11 +192,11 @@ def spanningScores(TS, NET, CI, clusters):
     scores = {}
     for miR, stats in data.iteritems():
 
-        first = stats['negp'] / max_p    # -log(pval) / -log(best_pval) (max = 1)
-        second = stats['clust_count'] / max_c # cluster_count / best_cluster_count (max = 1)
-        third = stats['hits'] / max_o # hit_count / best_hit_count (max = 1)
+        first  = stats['negp'] / max_p
+        second = stats['clust_count'] / max_c
+        third  = stats['hits'] / max_o
 
-        scores[miR] = first + second + third    # sum score components (max score = 3)
+        scores[miR] = first + second + third # sum score components
 
     return scores
 
