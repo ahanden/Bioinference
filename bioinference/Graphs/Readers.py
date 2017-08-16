@@ -15,7 +15,7 @@ def read_db(conn, gene_db):
 
     Returns
     -------
-    G : A NetworkX Graph
+    A NetworkX Graph
     """
 
     G = nx.Graph()
@@ -45,7 +45,7 @@ def read_tsv(file_name, gene_db, source="eid", delimiter="\t", header=False):
 
     Returns
     -------
-    G : A NetworkX Graph
+    A NetworkX Graph
     """
 
     G = nx.Graph()
@@ -72,7 +72,7 @@ def read_sif(file_name, gene_db, source="eid"):
 
     Returns
     -------
-    G : A NetworkX Graph
+    A NetworkX Graph
     """
 
     G = nx.Graph()
