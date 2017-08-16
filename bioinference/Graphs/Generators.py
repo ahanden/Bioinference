@@ -3,7 +3,6 @@
 from fisher import pvalue
 from random import shuffle
 import networkx as nx
-import sys
 
 def fishers(N,n,M,x):
     """Estimates the p-value of Fisher's Exact Test
@@ -20,8 +19,9 @@ def fishers(N,n,M,x):
     
     Returns
     -------
-    p : the right-tailed p-value
+    The right-tailed p-value
     """
+    
     tp = x
     fp = M - x
     fn = n - x
