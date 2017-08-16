@@ -118,8 +118,8 @@ class GeneDB:
         ----------
         gene_id : A gene identifier
 
-        source : The source of the identifier. Valid options are Entrez,
-                 Symbol, or any cross database name in the gene_xrefs table.
+        source : The source of the identifier. Valid options are eid,
+                 symbol, or any cross database name in the gene_xrefs table.
 
         Returns
         -------
@@ -128,7 +128,7 @@ class GeneDB:
         
         cursor = self.conn(cursor)
 
-        if source == "Entrez":
+        if source == "eid":
             try:
                 eid = int(gene_id)
             except ValueError:
@@ -155,7 +155,7 @@ class GeneDB:
 
             raise KeyError("Entrez ID %d was not found in the database" % eid)
 
-        elif source == "Symbol":
+        elif source == "symbol":
             args = {"symbol": gene_id}
             cursor.execute("""
                 SELECT entrez_id

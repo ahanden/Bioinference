@@ -4,7 +4,7 @@ import networkx as nx
 import sys
 from itertools import chain
 
-def prunedGraph(GO, CI, pmax=0.05, G=None):
+def prunedGraph(goi, CI, pmax=0.05, G=None):
     """Creates am expanded graph of nodes that are significantly connected to genes of
     interest. 
     
@@ -23,9 +23,9 @@ def prunedGraph(GO, CI, pmax=0.05, G=None):
 
     Parameters
     ----------
-    CI : the consolidated interactome
-    
     goi : a list of genes of interest
+    
+    CI : the consolidated interactome
     
     pmax : the p-value cutoff for significance (default=0.05)
 
@@ -367,3 +367,27 @@ def getPartners(nodes,CI,depth=1):
                     next_level[neighbor] = True
                     
     return visited.keys()
+
+def fishers(N,n,M,x):
+    """Estimates the p-value of Fisher's Exact Test
+
+    Parameters
+    ----------
+    N : Population size
+    
+    n : Number of successes in the population
+    
+    M : Sample size
+    
+    x : Number of successes in the sample
+    
+    Returns
+    -------
+    p : the right-tailed p-value
+    """
+    tp = x
+    fp = M - x
+    fn = n - x
+    tn = N - tp - fp - fn
+    return pvalue(tp,fp,fn,tn).right_tail
+

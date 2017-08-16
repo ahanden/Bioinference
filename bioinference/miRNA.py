@@ -93,7 +93,7 @@ def loadMirTarBase(conn, fname, species_names=None):
     ----------
     conn : a MySQLdb connection to the genes database
 
-    fname : The path to the TargetScan database dump
+    fname : The path to the miRTarBase database dump
 
     species_names: A list of the proper names of species to extract miRNAs
                   for. If given, this method will only return miRs for the given 
@@ -109,7 +109,7 @@ def loadMirTarBase(conn, fname, species_names=None):
     if species_names:
         species_names = set(species_names)
 
-    with open('miRTarBase_MTI.csv', 'r') as file:
+    with open(fname, 'r') as file:
         for line in file:
             fields = line.strip().split(",")
 
@@ -166,9 +166,9 @@ def spanningScores(TS, NET, CI, clusters):
             'pval'        : pval
         }
 
-    max_o = float(max([data[miR]['hits']        for miR in data])) # best achieved overlap
-    max_c = float(max([data[miR]['clust_count'] for miR in data])) # best achieved cluster count
-    max_p = float(max([data[miR]['negp']        for miR in data])) # best achieved -log(pval)
+    max_o = float(max([0] + [data[miR]['hits']        for miR in data])) # best achieved overlap
+    max_c = float(max([0] + [data[miR]['clust_count'] for miR in data])) # best achieved cluster count
+    max_p = float(max([0] + [data[miR]['negp']        for miR in data])) # best achieved -log(pval)
 
     if max_o == 0:
         raise Exception("There are no miRNA targets in the network")
