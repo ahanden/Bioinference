@@ -5,6 +5,9 @@ import warnings
 from MySQLdb import connections
 
 class Gene:
+
+    __output_key = "Entrez"
+
     def __init__(self, eid, db=None):
         try:
             self.eid = int(eid)
@@ -16,6 +19,22 @@ class Gene:
 
         self.db  = db
         self.cross = {}
+
+    @staticmethod
+    def set_output_source(source):
+        """Defines what should be displayed when converting the gene to a
+        string.
+
+        Parameters
+        ----------
+        source : The key to use for the Gene's output. Same as __get__
+        """
+
+        Gene.__output_key = source
+
+    def __repr__(self):
+        return self[Gene.__output_key]
+    __str__ = __repr__
 
     def __get__(self, key):
         if key == "eid":
