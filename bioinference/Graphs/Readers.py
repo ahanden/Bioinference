@@ -2,7 +2,7 @@
 
 import MySQLdb
 import networkx as nx
-from Genes import GeneDB, Gene
+from bioinference.Genes import GeneDB
 
 def read_db(conn, gene_db):
     """Reads interactions into a NetworkX graph from a MySQL database

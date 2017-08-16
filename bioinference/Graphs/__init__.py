@@ -1,2 +1,2 @@
-from ..Genes import GeneDB, Gene
 from Readers import *
+from Writers import *
