@@ -23,7 +23,7 @@ class Gene:
         elif key == "symbol":
             if not hasattr(self, "symbol"):
                 if self.db is not None:
-                    self.symbol = self.db.getSymbol(self.eid)
+                    self.symbol = self.db.get_symbol(self.eid)
                 else:
                     raise KeyError("Gene does not have a database " + \
                                    "connection to look up its symbol")
@@ -31,7 +31,7 @@ class Gene:
         else:
             if key not in self.cross:
                 if self.db is not None:
-                    self.cross[key] = self.db.getCrossID(self.eid, key)
+                    self.cross[key] = self.db.get_cross_id(self.eid, key)
                 else:
                     raise KeyError("Gene does not have a database " + \
                                    "connection to look up its symbol")
@@ -45,7 +45,6 @@ class Gene:
 
     def __hash__(self):
         return hash(("Gene", self.eid))
-
 
 class GeneDB:
     def int(self, *args, **kwargs):
@@ -93,7 +92,7 @@ class GeneDB:
                 raise TypeError("You must pass host, db, user, and passwd " + \
                                 "to connect()")
 
-    def getGene(self, gene_id, source="Entrez"):
+    def get_gene(self, gene_id, source="Entrez"):
         """Returns a Gene object from the given ID and type.
 
         Parameters
@@ -178,7 +177,7 @@ class GeneDB:
             raise KeyError("Gene ID %s from source %s was not found " + \
                            "in the database" % (gene_id, source))
 
-    def getCrossID(self, entrez_id, xref_db):
+    def get_cross_id(self, entrez_id, xref_db):
         """Finds a gene's identifier from an outside database based on its
         Entrez ID.
 
@@ -211,12 +210,12 @@ class GeneDB:
         raise KeyError("Unable to find an external identifer for database " + \
                        "%s using Entrez ID %d" % (xref_db, entrez_id))
 
-    def getSymbol(self, entrez_id):
+    def get_symbol(self, entrez_id):
         """Finds a gene's official symbol (if it has one) given its Entrez ID.
 
         Parameters
         ----------
-        entrez_id - A gene's Entrez ID
+        entrez_id : A gene's Entrez ID
 
         Returns
         -------
