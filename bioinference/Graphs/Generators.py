@@ -28,6 +28,50 @@ def fishers(N,n,M,x):
     tn = N - tp - fp - fn
     return pvalue(tp,fp,fn,tn).right_tail
 
+def subgraph(graph, nodes):
+    """Creates a subgraph while maintaining object identities
+
+    Parameters
+    ----------
+    graph : The NetworkX Graph to extract nodes and edges from
+
+    nodes : An iterable of nodes to create a subgraph with
+
+    Return
+    ------
+    A NetworkX Graph object
+
+    Notes
+    -----
+    Will not do self-loops or DiGraphs
+    """
+
+    from bioinference.Genes import Gene
+
+    new_graph = nx.Graph()
+
+    bunch = graph.nbunch_iter(nodes)
+    for node in bunch:
+        new_graph.node[node] = graph.node[node]
+
+    # namespace shortcuts for speed
+    new_adj = new_graph.adj
+    old_adj = graph.adj
+
+    # add nodes and edges (undirected method)
+    for n in new_graph.node:
+        new_nbrs = new_graph.adjlist_dict_factory()
+        new_adj[n] = new_nbrs
+        for nbr, d in old_adj[n].items():
+            if nbr in new_adj:
+                # add both representations of edge: n-nbr and nbr-n
+                new_nbrs[nbr] = d
+                new_adj[nbr][n] = d
+    new_graph.graph = graph.graph
+    return new_graph
+
+
+
 def pruned_graph(seeds, interactome, p_max=0.05, graph=None):
     """Creates am expanded graph of nodes that are significantly connected to genes of
     interest. 
@@ -220,7 +264,7 @@ def linker_graph(seeds, interactome):
     An expanded NetworkX Graph
     """
 
-    seeds = set(seeds)
+    seeds = set(seeds) & set(interactome)
 
     nodes = set(max(
         nx.connected_components(
@@ -229,13 +273,16 @@ def linker_graph(seeds, interactome):
 
     orphaned = seeds - nodes
 
-    # Keep track of which targets need to be visited
-    this_level = None
-    next_level = included.copy()
-
     while orphaned:
         # Find any common interactors for the orphans and the current graph
-        linkers = set(interactome[orphaned]) & set(interactome[nodes])
+        orphan_edges = set()
+        for orphan in orphaned:
+            orphan_edges.update(interactome[orphan].keys())
+
+        linkers = set()
+        for node in nodes:
+            linkers.update(set(interactome[node].keys()) & orphan_edges)
+
 
         # Give up if we can't find any new connections
         if not linkers:
@@ -245,7 +292,7 @@ def linker_graph(seeds, interactome):
         # newly included orphans
         nodes = set(max(
             nx.connected_components(
-                interactome.subgraph(nodes | linkers | orphans)),
+                interactome.subgraph(nodes | linkers | orphaned)),
             key=len))
 
         orphaned -= nodes
@@ -337,10 +384,10 @@ def monte_carlo_pruned_graph(seeds, interactome, method, iters=1000, max_p=0.05,
 
         # Check to see if pruning this edge makes a GOI orphan
         trial = graph.copy()
-        trail.remove_edge(*edge[:2])
-        trail = max(nx.connected_component_subgraphs(T), key=len)
+        trial.remove_edge(*edge[:2])
+        trial = max(nx.connected_component_subgraphs(trial), key=len)
 
-        if len(set(trial) & seeds) < len(se(graph) & seeds):
+        if len(set(trial) & seeds) < len(set(graph) & seeds):
             break
 
         # Otherwise, remove the insignificant edge
