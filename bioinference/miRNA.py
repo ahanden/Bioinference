@@ -91,7 +91,10 @@ def read_ts(file_name, gene_db, species_names=None):
                     if mir not in targets:
                         targets[mir] = set()
                         
-                    targets[mir].add(gene_db.get_gene(fields[2], "symbol"))
+                    try:
+                        targets[mir].add(gene_db.get_gene(fields[2], "symbol"))
+                    except KeyError:
+                        pass
 
     return targets
 
@@ -173,11 +176,11 @@ def spanning_scores(mirs, graph, interactome, clusters):
         
         clust_count = sum([1 for clu in clusters if len(clu) > 3 and set(targets) & clu])
 
-        data[miR] = {
+        data[mir] = {
             'hits'        : x,
             'neg_p'       : neg_p,
             'clust_count' : clust_count,
-            'p_val'       : pval
+            'p_val'       : p_val
         }
 
     max_o = float(max([0] + [data[miR]['hits']        for miR in data])) # best achieved overlap
@@ -192,7 +195,7 @@ def spanning_scores(mirs, graph, interactome, clusters):
     scores = {}
     for miR, stats in data.iteritems():
 
-        first  = stats['negp'] / max_p
+        first  = stats['neg_p'] / max_p
         second = stats['clust_count'] / max_c
         third  = stats['hits'] / max_o
 
