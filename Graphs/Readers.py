@@ -22,9 +22,12 @@ def read_db(conn, gene_db):
     cursor = conn.cursor()
     cursor.execute("SELECT entrez_id1, entrez_id2 FROM interactions")
     for row in cursor.fetchall():
-        G.add_edge(
-            gene_db.get_gene(row[0]),
-            gene_db.get_gene(row[1]))
+        try:
+            G.add_edge(
+                gene_db.get_gene(row[0]),
+                gene_db.get_gene(row[1]))
+        except KeyError:
+            pass
 
     return G
 
