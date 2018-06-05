@@ -1,7 +1,8 @@
 #!/bin/python
 
-from fisher import pvalue
 from Genes import GeneDB
+import scipy.stats
+fisher_exact = scipy.stats.hypergeom.sf
 
 def read_bi_file(file_name, gene_db, conn=None):
     """Reads a pathway file as retrieved from the Broad Institute
@@ -47,7 +48,7 @@ def fisher_enrichment(genes, paths, N=20000):
     ----------
     genes : An interable of Gene objects to enrich
 
-    paths : a dictionary of paths to Gene objects
+    paths : a dictionary of paths to sets of Gene objects
 
     N : the population size (default=20000)
 
@@ -67,15 +68,8 @@ def fisher_enrichment(genes, paths, N=20000):
     results = {}
 
     for path, pop in paths.iteritems():
-        tp = len(sample & pop)
-        fp = len(sample) - tp
-        fn = len(pop) - tp
-        tn = N - tp - fp - fn
-        
-        p = pvalue(tp, fp, fn, tn).right_tail
-
         results[path] = {
-            'pval'  : p, 
+            'pval'  : fisher_exact(len(sample & pop) - 1, N, len(pop), len(sample)),
             'genes' : sample & pop,
             'size'  : len(pop)}
        

@@ -1,32 +1,9 @@
 #!/usr/bin/python
 
-from fisher import pvalue
 from random import shuffle
 import networkx as nx
-
-def fishers(N,n,M,x):
-    """Estimates the p-value of Fisher's Exact Test
-
-    Parameters
-    ----------
-    N : Population size
-    
-    n : Number of successes in the population
-    
-    M : Sample size
-    
-    x : Number of successes in the sample
-    
-    Returns
-    -------
-    The right-tailed p-value
-    """
-    
-    tp = x
-    fp = M - x
-    fn = n - x
-    tn = N - tp - fp - fn
-    return pvalue(tp,fp,fn,tn).right_tail
+import scipy.stats
+fisher_exact = scipy.stats.hypergeom.sf
 
 def subgraph(graph, nodes):
     """Creates a subgraph while maintaining object identities
@@ -123,7 +100,7 @@ def pruned_graph(seeds, interactome, p_max=0.05, graph=None):
         x = len(set(interactome[node]) & seeds) # Successes in sample
 
         # Compute significance
-        p = fishers(N,n,M,x)
+        p = fisher_exact(x,N,n,M)
 
         # Prune the node if it is not significant
         if p >= pmax:

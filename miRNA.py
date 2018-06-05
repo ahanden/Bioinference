@@ -1,8 +1,9 @@
 #!/usr/bin/python
 
-from fisher import pvalue
 from math import log
 from Genes import GeneDB
+import scipy.stats
+fisher_exact = scipy.stats.hypergeom.sf
 
 def read_ts(file_name, gene_db, species_names=None):
     """Reads the Target Scan database into memory as a dictionary.
@@ -171,7 +172,7 @@ def spanning_scores(mirs, graph, interactome, clusters):
         n    = len(pool)                  # successes in population
         x    = len(pool & set(graph))     # successes in sample
 
-        p_val = fishers(N,n,M,x)
+        p_val = fisher_exact(x, N, n, M)
         neg_p = -log(p_val)
         
         clust_count = sum([1 for clu in clusters if len(clu) > 3 and set(targets) & clu])
@@ -202,27 +203,3 @@ def spanning_scores(mirs, graph, interactome, clusters):
         scores[miR] = first + second + third # sum score components
 
     return scores
-
-def fishers(N,n,M,x):
-    """Estimates the p-value of Fisher's Exact Test
-
-    Parameters
-    ----------
-    N : Population size
-    
-    n : Number of successes in the population
-    
-    M : Sample size
-    
-    x : Number of successes in the sample
-    
-    Returns
-    -------
-    p : the right-tailed p-value
-    """
-    tp = x
-    fp = M - x
-    fn = n - x
-    tn = N - tp - fp - fn
-    return pvalue(tp,fp,fn,tn).right_tail
-
