@@ -21,11 +21,11 @@ def infomap(graph, weight_feature=None):
     A dictionary of clusters to node lists
     """
 
-    idToNode = graph.nodes()
+    idToNode = list(graph)
     nodeToId = {idToNode[i] : i for i in xrange(len(idToNode))}
 
     fname = uuid4()
-    with open('/tmp/%s.llf' % (fname),'w') as file:
+    with open('%s.llf' % (fname),'w') as file:
         for edge in graph.edges(data=True):
             if weight_feature is None:
                 file.write("%d %d 1\n" % (nodeToId[edge[0]], nodeToId[edge[1]]))
@@ -33,17 +33,17 @@ def infomap(graph, weight_feature=None):
                 file.write("%d %d %d\n" % (nodeToId[edge[0]], nodeToId[edge[1]], edge[2][weight_feature]))
 
     proc = Popen([
-            "/home/HandenA/extend_network/Infomap/Infomap.exe",
+            "C:\\infomap\\Infomap.exe",
             "--input-format", "link-list",
             "--zero-based-numbering",
             "--clu",
             "--undirected",
             "--silent",
-            "/tmp/%s.llf" % (fname),
-            "/tmp/"]).wait()
+            "%s.llf" % (fname),
+            "./"]).wait()
 
     clustDict = {}
-    with open('/tmp/%s.clu' % (fname),'r') as file:
+    with open('%s.clu' % (fname),'r') as file:
         for line in file:
             if line[0] == "#":
                 continue
@@ -55,8 +55,8 @@ def infomap(graph, weight_feature=None):
                 clustDict[cluster] = []
             clustDict[cluster].append(idToNode[id])
 
-    os.remove('/tmp/%s.llf' % (fname))
-    os.remove('/tmp/%s.clu' % (fname))
+    os.remove('%s.llf' % (fname))
+    os.remove('%s.clu' % (fname))
 
     return clustDict
 
